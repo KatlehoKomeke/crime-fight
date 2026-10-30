@@ -160,8 +160,10 @@ export class WebStack extends Stack {
 
     // Hashed bundles are immutable and never pruned, so a tab still running the
     // previous release can keep lazy-loading its chunks after a deploy.
+    // Directories must be re-included themselves: like .gitignore, an excluded
+    // directory is never descended into, so `!_expo/**` alone matches nothing.
     new s3deploy.BucketDeployment(this, 'DeployHashedAssets', {
-      sources: [s3deploy.Source.asset(client, { exclude: ['*', '!_expo/**', '!assets/**'] })],
+      sources: [s3deploy.Source.asset(client, { exclude: ['*', '!_expo', '!_expo/**', '!assets', '!assets/**'] })],
       destinationBucket: bucket,
       prune: false,
       cacheControl: [s3deploy.CacheControl.fromString('public, max-age=31536000, immutable')],

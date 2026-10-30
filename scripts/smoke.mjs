@@ -21,9 +21,10 @@ const retry = async (name, fn, attempts = 6) => {
   }
 }
 
+let html = ''
 await retry('home page is server-rendered', async () => {
   const res = await fetch(`${site}/`)
-  const html = await res.text()
+  html = await res.text()
   if (res.status !== 200) throw new Error(`status ${res.status}`)
   if (!html.includes('<title>CIVIC/ONE')) throw new Error('missing SSR <title>')
   if (!html.includes('__CIVIC_CONFIG__')) throw new Error('missing runtime config')
@@ -32,6 +33,17 @@ await retry('home page is server-rendered', async () => {
 await retry('static assets are served from S3', async () => {
   const res = await fetch(`${site}/robots.txt`)
   if (res.status !== 200) throw new Error(`status ${res.status}`)
+})
+
+// Without its hashed bundles the page renders but never hydrates.
+const scripts = [...html.matchAll(/src="(\/_expo\/static\/js\/[^"]+\.js)"/g)].map((m) => m[1])
+if (scripts.length === 0) throw new Error('home page references no /_expo/static scripts')
+await retry('hashed JS bundles are served', async () => {
+  for (const src of scripts) {
+    const res = await fetch(`${site}${src}`)
+    const type = res.headers.get('content-type') ?? ''
+    if (res.status !== 200 || !type.includes('javascript')) throw new Error(`${src}: status ${res.status} (${type})`)
+  }
 })
 
 const documents = JSON.parse(readFileSync(new URL('../packages/graphql/src/gql/persisted-documents.json', import.meta.url), 'utf8'))
