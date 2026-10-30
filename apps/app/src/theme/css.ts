@@ -47,6 +47,13 @@ textarea,input{caret-color:var(--c-text)}
 }
 @media (min-width:760px){[data-mobile-only]{display:none!important}}
 
+[data-signin="mark"]{display:flex!important}
+@media (max-width:999px){[data-signin="mark"]{display:none!important}}
+@media (min-width:1000px){
+  [data-signin="content"]{padding-left:max(48px,8vw)!important}
+  [data-signin="headline"]{font-size:68px!important;line-height:70px!important;letter-spacing:-2.6px!important}
+}
+
 @keyframes civic-pulse{0%{box-shadow:0 0 0 0 rgba(244,81,62,.45)}70%{box-shadow:0 0 0 8px rgba(244,81,62,0)}100%{box-shadow:0 0 0 0 rgba(244,81,62,0)}}
 [data-pulse]{animation:civic-pulse 2s infinite}
 @keyframes civic-shimmer{0%{opacity:.55}50%{opacity:1}100%{opacity:.55}}
