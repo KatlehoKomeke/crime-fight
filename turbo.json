@@ -1,0 +1,36 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "globalEnv": ["NODE_ENV"],
+  "tasks": {
+    "codegen": {
+      "dependsOn": ["^codegen"]
+    },
+    "@civic/api#codegen": {
+      "dependsOn": [],
+      "inputs": ["src/**", "scripts/**"],
+      "outputs": [],
+      "cache": false
+    },
+    "@civic/graphql#codegen": {
+      "dependsOn": ["@civic/api#codegen"],
+      "inputs": ["schema.graphql", "codegen.ts", "../../apps/app/src/**"],
+      "outputs": ["src/gql/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["codegen", "^codegen"]
+    },
+    "test": {
+      "dependsOn": ["codegen", "^codegen"],
+      "env": ["DATABASE_URL", "TEST_DATABASE_URL"]
+    },
+    "build": {
+      "dependsOn": ["codegen", "^codegen", "^build"],
+      "env": ["EXPO_PUBLIC_*", "CIVIC_*"],
+      "outputs": ["dist/**", ".lambda/**", "cdk.out/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

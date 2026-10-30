@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Desktop builds have their own workflow; skip the ~100 MB Electron download here.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build, synth
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: imresamu/postgis:17-3.5
+        env:
+          POSTGRES_USER: civic
+          POSTGRES_PASSWORD: civic
+          POSTGRES_DB: civic
+        ports: ['54329:5432']
+        options: >-
+          --health-cmd "pg_isready -U civic -d civic"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      DATABASE_URL: postgres://civic:civic@localhost:54329/civic
+      TEST_DATABASE_URL: postgres://civic:civic@localhost:54329/civic_test
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: GraphQL contract is committed and current
+        run: |
+          pnpm --filter @civic/api codegen
+          pnpm --filter @civic/graphql codegen
+          git diff --exit-code -- packages/graphql || (echo "::error::Run 'pnpm codegen' and commit the result" && exit 1)
+
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: Build web (SSR bundle + Lambda package)
+        run: pnpm --filter @civic/app build
+
+      - name: Synthesize infrastructure
+        run: pnpm --filter @civic/infra synth
+        env:
+          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_REGION: af-south-1
+
+      # Build once, promote the same artefact QA → prod.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: |
+            apps/app/dist
+            apps/app/.lambda
+          include-hidden-files: true
+          retention-days: 7

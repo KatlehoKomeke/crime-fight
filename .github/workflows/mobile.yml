@@ -1,0 +1,51 @@
+name: Mobile builds
+
+# iOS / Android binaries are built on EAS (Expo's build service) from the same
+# codebase as the web app. Needs an EXPO_TOKEN secret and the EXPO_PUBLIC_*
+# variables configured in the EAS project's `preview` and `production` environments.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Build profile
+        type: choice
+        options: [qa, production]
+        default: qa
+      platform:
+        description: Platform
+        type: choice
+        options: [all, ios, android]
+        default: all
+      submit:
+        description: Submit production builds to the stores
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: eas build
+        working-directory: apps/app
+        run: >-
+          eas build --non-interactive --no-wait
+          --profile ${{ inputs.profile }}
+          --platform ${{ inputs.platform }}
+          ${{ inputs.submit && inputs.profile == 'production' && '--auto-submit' || '' }}

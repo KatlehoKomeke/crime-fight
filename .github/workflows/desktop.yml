@@ -1,0 +1,46 @@
+name: Desktop builds
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: Site the desktop app loads (defaults to the prod URL baked into the app)
+        type: string
+        required: false
+
+permissions:
+  contents: write # attach installers to the GitHub release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Package
+        working-directory: apps/desktop
+        run: pnpm dist
+        env:
+          CIVIC_DESKTOP_URL: ${{ inputs.site_url || vars.PROD_SITE_URL }}
+          # Code signing / notarisation: set CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID,
+          # APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID as repository secrets.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: apps/desktop/release/*.*
+          retention-days: 14

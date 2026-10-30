@@ -1,0 +1,80 @@
+name: Deploy stage
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment (qa | production)
+        type: string
+        required: true
+      stage:
+        description: CDK stage construct id (Qa | Prod)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.stage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.outputs.outputs.site_url }}
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # Per-environment settings live in GitHub environment variables.
+      QA_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      PROD_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      QA_AWS_REGION: ${{ vars.AWS_REGION }}
+      PROD_AWS_REGION: ${{ vars.AWS_REGION }}
+      QA_DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+      PROD_DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+      QA_CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN }}
+      PROD_CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN }}
+      QA_HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+      PROD_HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+      QA_HOSTED_ZONE_NAME: ${{ vars.HOSTED_ZONE_NAME }}
+      PROD_HOSTED_ZONE_NAME: ${{ vars.HOSTED_ZONE_NAME }}
+      QA_ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
+      PROD_ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
+      PROD_API_RESERVED_CONCURRENCY: ${{ vars.API_RESERVED_CONCURRENCY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: apps/app
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: civic-${{ inputs.environment }}-${{ github.run_id }}
+
+      - name: cdk deploy ${{ inputs.stage }}/*
+        working-directory: infra
+        run: pnpm cdk deploy '${{ inputs.stage }}/*' --require-approval never --concurrency 4 --outputs-file ../cdk-outputs.json
+
+      - name: Read outputs
+        id: outputs
+        run: |
+          site=$(node -e "const o=require('./cdk-outputs.json'); const w=Object.entries(o).find(([k])=>k.endsWith('Web'))[1]; console.log(w.SiteUrl)")
+          echo "site_url=$site" >> "$GITHUB_OUTPUT"
+          echo "### ${{ inputs.stage }} deployed → $site" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test
+        run: node scripts/smoke.mjs "${{ steps.outputs.outputs.site_url }}"

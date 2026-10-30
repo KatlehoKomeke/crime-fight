@@ -1,0 +1,41 @@
+name: Deploy
+
+# Every push to main ships to QA, is smoke-tested there, then the same build is
+# promoted to prod. Gate prod by adding required reviewers to the `production`
+# environment (Settings → Environments); without reviewers it deploys straight through.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # GitHub OIDC → AWS, no long-lived keys
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  qa:
+    needs: verify
+    uses: ./.github/workflows/deploy-stage.yml
+    with:
+      environment: qa
+      stage: Qa
+    secrets: inherit
+
+  prod:
+    needs: qa
+    uses: ./.github/workflows/deploy-stage.yml
+    with:
+      environment: production
+      stage: Prod
+    secrets: inherit

@@ -1,0 +1,29 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "node": "24.11.0",
+      "pnpm": "10.34.9"
+    },
+    "qa": {
+      "extends": "base",
+      "distribution": "internal",
+      "channel": "qa",
+      "environment": "preview",
+      "env": { "CIVIC_STAGE": "qa" }
+    },
+    "production": {
+      "extends": "base",
+      "autoIncrement": true,
+      "channel": "production",
+      "environment": "production",
+      "env": { "CIVIC_STAGE": "prod" }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

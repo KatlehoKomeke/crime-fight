@@ -1,0 +1,27 @@
+{
+  "name": "civic-one",
+  "private": true,
+  "description": "CIVIC/ONE — verified local safety updates. Universal app (iOS, Android, web SSR, desktop), GraphQL API and AWS CDK infrastructure.",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@civic/api --filter=@civic/app",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "oxlint --deny-warnings apps packages infra",
+    "codegen": "turbo run codegen",
+    "db:up": "docker compose up -d --wait db",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @civic/db migrate",
+    "db:seed": "pnpm --filter @civic/db seed",
+    "db:generate": "pnpm --filter @civic/db generate"
+  },
+  "devDependencies": {
+    "oxlint": "^1.90.0",
+    "turbo": "^2.11.10",
+    "typescript": "~6.0.3"
+  }
+}

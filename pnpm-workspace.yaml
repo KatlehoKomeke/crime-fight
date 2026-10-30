@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+  - infra
+
+# React Native's Metro bundler and several native modules still assume a flat
+# node_modules tree, so we trade pnpm's strict isolation for reliability.
+nodeLinker: hoisted
+
+# A single graphql realm across api, codegen and urql avoids
+# "Cannot use GraphQLSchema from another module or realm" errors.
+overrides:
+  graphql: ^17.0.2
+
+onlyBuiltDependencies:
+  - electron
+  - esbuild
