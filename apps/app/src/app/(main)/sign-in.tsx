@@ -3,9 +3,11 @@ import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Icon } from '@/components/Icon'
 import { PageHeader, Screen } from '@/components/Screen'
+import { SsoButton } from '@/components/SsoButton'
 import { useToast } from '@/components/Toast'
 import { Avatar, Button, Card, Touchable, Txt } from '@/components/ui'
 import { useAuth } from '@/lib/auth'
+import { getConfig, type SsoProvider } from '@/lib/config'
 import { pageMetadata } from '@/lib/seo'
 import { brand, useColors } from '@/theme'
 
@@ -26,18 +28,21 @@ export default function SignInScreen() {
   const router = useRouter()
   const toast = useToast()
   const { mode, signIn, status } = useAuth()
-  const [busy, setBusy] = useState(false)
+  // Apple first: App Store rules want it at least as prominent as other providers.
+  const providers = (['apple', 'google'] as const).filter((p) => getConfig().ssoProviders.includes(p))
+  const [busy, setBusy] = useState<SsoProvider | 'dev' | null>(null)
 
-  const run = async (handle?: string) => {
-    setBusy(true)
+  const run = async (via: Parameters<typeof signIn>[0]) => {
+    setBusy('provider' in via ? via.provider : 'dev')
     try {
-      await signIn(handle)
-      toast('Welcome to CIVIC/ONE')
-      router.replace('/')
+      if (await signIn(via)) {
+        toast('Welcome to CIVIC/ONE')
+        router.replace('/')
+      }
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Sign-in failed')
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
@@ -58,9 +63,19 @@ export default function SignInScreen() {
           <Button label="You’re signed in — go to your feed" onPress={() => router.replace('/')} />
         ) : mode === 'cognito' ? (
           <View style={{ width: '100%', maxWidth: 360, gap: 10, marginTop: 10 }}>
-            <Button label="Continue with email" size="lg" icon="lock" loading={busy} onPress={() => void run()} />
+            {providers.map((provider) => (
+              <SsoButton
+                key={provider}
+                provider={provider}
+                loading={busy === provider}
+                disabled={busy !== null}
+                onPress={() => void run({ provider })}
+              />
+            ))}
             <Txt variant="small" color="textMuted" style={{ textAlign: 'center' }}>
-              Secured by Amazon Cognito with PKCE. We never see your password.
+              {providers.length
+                ? 'We receive only your name and email address. We never see your password.'
+                : 'Sign-in opens soon. You can browse updates and alerts in the meantime.'}
             </Txt>
           </View>
         ) : (
@@ -73,8 +88,8 @@ export default function SignInScreen() {
             {DEV_ACCOUNTS.map((account) => (
               <Touchable
                 key={account.handle}
-                disabled={busy}
-                onPress={() => void run(account.handle)}
+                disabled={busy !== null}
+                onPress={() => void run({ devHandle: account.handle })}
                 accessibilityRole="button"
                 accessibilityLabel={`Sign in as ${account.name}`}
                 style={[styles.devRow, { borderBottomColor: c.line }]}

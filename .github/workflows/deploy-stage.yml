@@ -42,6 +42,11 @@ jobs:
       QA_ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
       PROD_ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
       PROD_API_RESERVED_CONCURRENCY: ${{ vars.API_RESERVED_CONCURRENCY }}
+      # SSO providers (public IDs; secrets live in Secrets Manager `civic/sso`).
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      APPLE_SERVICES_ID: ${{ vars.APPLE_SERVICES_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      APPLE_KEY_ID: ${{ vars.APPLE_KEY_ID }}
     steps:
       - uses: actions/checkout@v5
 

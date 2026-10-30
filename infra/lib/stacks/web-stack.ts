@@ -16,12 +16,19 @@ import * as ssm from 'aws-cdk-lib/aws-ssm'
 import type { Construct } from 'constructs'
 import { appScheme, type StageConfig } from '../config'
 import { fromRoot } from '../paths'
+import type { SsoProvider } from './auth-stack'
 
 interface WebStackProps extends StackProps {
   config: StageConfig
   api: apigwv2.HttpApi
   userPool: cognito.IUserPool
   cognitoDomain: string
+  ssoProviders: SsoProvider[]
+}
+
+const CLIENT_PROVIDER: Record<SsoProvider, cognito.UserPoolClientIdentityProvider> = {
+  google: cognito.UserPoolClientIdentityProvider.GOOGLE,
+  apple: cognito.UserPoolClientIdentityProvider.APPLE,
 }
 
 /**
@@ -34,7 +41,7 @@ interface WebStackProps extends StackProps {
 export class WebStack extends Stack {
   constructor(scope: Construct, id: string, props: WebStackProps) {
     super(scope, id, props)
-    const { config, api, userPool, cognitoDomain } = props
+    const { config, api, userPool, cognitoDomain, ssoProviders } = props
     const stage = config.stage
 
     const client = fromRoot('apps/app/dist/client')
@@ -72,6 +79,7 @@ export class WebStack extends Stack {
         CIVIC_STAGE: stage,
         CIVIC_AUTH_MODE: 'cognito',
         CIVIC_COGNITO_DOMAIN: cognitoDomain,
+        CIVIC_SSO_PROVIDERS: ssoProviders.join(','),
         CIVIC_PUBLIC_API_URL: '/graphql',
         CIVIC_API_INTERNAL_URL: `https://${apiDomain}/graphql`,
         CIVIC_PERSISTED_QUERIES: 'true',
@@ -185,20 +193,26 @@ export class WebStack extends Stack {
       userPool,
       userPoolClientName: `civic-${stage}-app`,
       generateSecret: false,
-      authFlows: { userSrp: true },
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
         callbackUrls: [`${siteUrl}/auth/callback`, `${scheme}://auth/callback`, ...config.extraCallbackUrls],
         logoutUrls: [siteUrl, `${scheme}://`],
       },
-      supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
+      // SSO only. Before any provider is configured, COGNITO keeps the client
+      // valid, but with self sign-up off nobody can create an account through it.
+      supportedIdentityProviders: ssoProviders.length ? ssoProviders.map((p) => CLIENT_PROVIDER[p]) : [cognito.UserPoolClientIdentityProvider.COGNITO],
       preventUserExistenceErrors: true,
       enableTokenRevocation: true,
       idTokenValidity: Duration.hours(1),
       accessTokenValidity: Duration.hours(1),
       refreshTokenValidity: Duration.days(30),
     })
+    // Federated sign-in uses no API auth flows. CDK can't express "refresh only"
+    // (omitting authFlows means Cognito's defaults, which include password SRP).
+    const cfnClient = appClient.node.defaultChild as cognito.CfnUserPoolClient
+    cfnClient.explicitAuthFlows = ['ALLOW_REFRESH_TOKEN_AUTH']
+
     new cognito.CfnManagedLoginBranding(this, 'LoginBranding', {
       userPoolId: userPool.userPoolId,
       clientId: appClient.userPoolClientId,

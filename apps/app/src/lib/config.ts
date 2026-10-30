@@ -1,6 +1,8 @@
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
 
+export type SsoProvider = 'google' | 'apple'
+
 export interface RuntimeConfig {
   stage: string
   /** Endpoint the client talks to (same-origin `/graphql` on deployed web). */
@@ -9,10 +11,15 @@ export interface RuntimeConfig {
   authMode: 'dev' | 'cognito'
   cognitoDomain: string | null
   cognitoClientId: string | null
+  /** Sign-in providers enabled on the Cognito app client, in display order. */
+  ssoProviders: SsoProvider[]
   persistedQueries: boolean
 }
 
 export const isServer = Platform.OS === 'web' && typeof window === 'undefined'
+
+const parseSsoProviders = (raw: string | undefined): SsoProvider[] =>
+  (raw ?? '').split(',').filter((p): p is SsoProvider => p === 'google' || p === 'apple')
 
 /**
  * Server-side (SSR Lambda / dev server) config read at request time, so one
@@ -28,6 +35,7 @@ export function serverConfig(): RuntimeConfig {
     authMode: env.CIVIC_AUTH_MODE === 'cognito' ? 'cognito' : 'dev',
     cognitoDomain: env.CIVIC_COGNITO_DOMAIN ?? null,
     cognitoClientId: env.CIVIC_COGNITO_CLIENT_ID ?? null,
+    ssoProviders: parseSsoProviders(env.CIVIC_SSO_PROVIDERS),
     persistedQueries: env.CIVIC_PERSISTED_QUERIES === 'true',
   }
 }
@@ -48,6 +56,7 @@ function nativeConfig(): RuntimeConfig {
     authMode: extra.authMode === 'cognito' ? 'cognito' : 'dev',
     cognitoDomain: extra.cognitoDomain ?? null,
     cognitoClientId: extra.cognitoClientId ?? null,
+    ssoProviders: parseSsoProviders(extra.ssoProviders),
     persistedQueries: !__DEV__,
   }
 }

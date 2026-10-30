@@ -1,6 +1,6 @@
 import * as AuthSession from 'expo-auth-session'
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { getConfig, isServer } from './config'
+import { getConfig, isServer, type SsoProvider } from './config'
 import type { AuthBridge } from './graphql/client'
 import { storage } from './storage'
 
@@ -15,12 +15,19 @@ interface AuthContextValue {
   identity: string
   bridge: AuthBridge
   mode: 'dev' | 'cognito'
-  signIn: (devHandle?: string) => Promise<void>
+  /**
+   * Dev mode signs in as a seeded handle; Cognito mode goes to an SSO provider.
+   * Resolves false when the user closes the provider's window.
+   */
+  signIn: (via: { devHandle: string } | { provider: SsoProvider }) => Promise<boolean>
   signOut: () => Promise<void>
 }
 
 const SESSION_KEY = 'civic.session.v1'
 const REFRESH_KEY = 'civic.refresh.v1'
+
+/** Cognito's names for the providers; `identity_provider` skips the managed login page. */
+const COGNITO_IDP: Record<SsoProvider, string> = { google: 'Google', apple: 'SignInWithApple' }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
@@ -68,16 +75,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
   // makeRedirectUri reads window.location on web, so it must not run during SSR.
   const redirectUri = useMemo(() => (isServer ? '' : AuthSession.makeRedirectUri({ path: 'auth/callback' })), [])
-  const [request, , promptAsync] = AuthSession.useAuthRequest(
-    {
-      clientId: config.cognitoClientId ?? 'unconfigured',
-      redirectUri,
-      scopes: ['openid', 'email', 'profile'],
-      usePKCE: true,
-      responseType: AuthSession.ResponseType.Code,
-    },
-    config.authMode === 'cognito' ? discovery : null,
-  )
+  // One prepared request per provider: on web the popup must open synchronously
+  // inside the click handler, so the authorize URL can't be built on demand.
+  const requestFor = (provider: SsoProvider): AuthSession.AuthRequestConfig => ({
+    clientId: config.cognitoClientId ?? 'unconfigured',
+    redirectUri,
+    scopes: ['openid', 'email', 'profile'],
+    usePKCE: true,
+    responseType: AuthSession.ResponseType.Code,
+    extraParams: { identity_provider: COGNITO_IDP[provider] },
+  })
+  const cognitoDiscovery = config.authMode === 'cognito' ? discovery : null
+  const [googleRequest, , promptGoogle] = AuthSession.useAuthRequest(requestFor('google'), cognitoDiscovery)
+  const [appleRequest, , promptApple] = AuthSession.useAuthRequest(requestFor('apple'), cognitoDiscovery)
 
   const persist = useCallback(
     async (next: Session | null, refreshToken?: string | null) => {
@@ -124,18 +134,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const signIn = useCallback(
-    async (devHandle?: string) => {
-      if (config.authMode === 'dev') return persist({ kind: 'dev', handle: devHandle ?? 'alexm' })
+    async (via: { devHandle: string } | { provider: SsoProvider }) => {
+      if (config.authMode === 'dev') {
+        await persist({ kind: 'dev', handle: 'devHandle' in via ? via.devHandle : 'alexm' })
+        return true
+      }
+      if (!('provider' in via) || !config.ssoProviders.includes(via.provider)) throw new Error('That sign-in option isn’t available')
+      const [request, promptAsync] = via.provider === 'google' ? [googleRequest, promptGoogle] : [appleRequest, promptApple]
       if (!request || !discovery || !config.cognitoClientId) throw new Error('Sign-in is not configured for this environment')
       const result = await promptAsync()
-      if (result.type !== 'success') return
+      if (result.type !== 'success') return false
       const tokens = await AuthSession.exchangeCodeAsync(
         { clientId: config.cognitoClientId, code: result.params.code!, redirectUri, extraParams: { code_verifier: request.codeVerifier ?? '' } },
         discovery,
       )
       await persist(sessionFromTokens(tokens), tokens.refreshToken)
+      return true
     },
-    [config.authMode, config.cognitoClientId, discovery, persist, promptAsync, redirectUri, request],
+    [appleRequest, config.authMode, config.cognitoClientId, config.ssoProviders, discovery, googleRequest, persist, promptApple, promptGoogle, redirectUri],
   )
 
   const signOut = useCallback(async () => {

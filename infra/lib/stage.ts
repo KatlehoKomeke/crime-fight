@@ -20,6 +20,6 @@ export class CivicStage extends Stage {
     const data = new DataStack(this, 'Data', { config })
     const auth = new AuthStack(this, 'Auth', { config })
     const api = new ApiStack(this, 'Api', { config, cluster: data.cluster, userPool: auth.userPool })
-    new WebStack(this, 'Web', { config, api: api.httpApi, userPool: auth.userPool, cognitoDomain: auth.domainName })
+    new WebStack(this, 'Web', { config, api: api.httpApi, userPool: auth.userPool, cognitoDomain: auth.domainName, ssoProviders: auth.ssoProviders })
   }
 }

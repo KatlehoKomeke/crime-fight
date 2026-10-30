@@ -51,7 +51,7 @@ pnpm db:migrate && pnpm db:seed
 pnpm dev                   # API on :4000/graphql (GraphiQL) + Expo on :8081 (press w for web, i/a for simulators)
 ```
 
-Locally, sign-in uses **dev mode**: `/sign-in` lists demo accounts (a member, a verified official, a newsroom and a support service), so you can try every permission level without Cognito.
+Locally, sign-in uses **dev mode**: `/sign-in` lists demo accounts (a member, a verified official, a newsroom and a support service), so you can try every permission level without Cognito. Deployed stages use **Google and Apple sign-in only** (see below).
 
 | Command | What it does |
 | --- | --- |
@@ -75,6 +75,23 @@ Locally, sign-in uses **dev mode**: `/sign-in` lists demo accounts (a member, a 
 4. On **`production`**, add required reviewers if you want a human approval between QA and prod. Without reviewers, every commit flows straight through once QA's smoke test passes.
 
 After that, **every push to `main` deploys**: CI → `Qa/*` → smoke test → `Prod/*`.
+
+### Sign-in: Google and Apple only
+
+There are no email/password accounts: self sign-up is off and the app client offers only the configured providers. Until a provider is configured, sign-in is closed and the app says so. One Google client and one Apple Services ID serve both stages; register both Cognito domains with each (`civicone-qa-<account>` and `civicone-prod-<account>`, from the `CognitoDomain` stack outputs).
+
+1. **Google** ([Cognito guide](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-social-idp-google.html)): in Google Auth Platform, add `amazoncognito.com` as an authorized domain, request only `openid`, `email`, `profile`, and create a **Web application** client:
+   - Authorized JavaScript origins: `https://<cognito-domain>` (one per stage)
+   - Authorized redirect URIs: `https://<cognito-domain>/oauth2/idpresponse` (one per stage)
+2. **Apple** ([Cognito guide](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-social-idp-apple.html)): in Certificates, Identifiers & Profiles, enable Sign in with Apple on the App ID `app.civicone`, create a **Services ID** (e.g. `app.civicone.signin`) with Domains `<cognito-domain>` and Return URLs `https://<cognito-domain>/oauth2/idpresponse` for both stages, then create a Sign in with Apple **key** (download the `.p8`; note the Key ID and your Team ID).
+3. Store the secrets in Secrets Manager as one secret, `civic/sso`, in the deploy region:
+   ```bash
+   node -e 'const fs=require("fs");process.stdout.write(JSON.stringify({googleClientSecret:fs.readFileSync(process.argv[1],"utf8").trim(),applePrivateKey:fs.readFileSync(process.argv[2],"utf8")}))' google-client-secret.txt AuthKey_XXXXXXXXXX.p8 > /tmp/sso.json
+   aws secretsmanager create-secret --name civic/sso --secret-string file:///tmp/sso.json && rm /tmp/sso.json
+   ```
+4. Set repository variables (public IDs, not secrets): `GOOGLE_CLIENT_ID`, `APPLE_SERVICES_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`. Then re-run *Deploy*. Each provider switches on when its variables are set.
+
+Native builds also need `EXPO_PUBLIC_SSO_PROVIDERS=apple,google` in their EAS environments.
 
 ### Mobile and desktop releases
 

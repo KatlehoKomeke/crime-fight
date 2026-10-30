@@ -1,5 +1,17 @@
 export type StageName = 'qa' | 'prod'
 
+/**
+ * Federated sign-in (the only way in). A provider is enabled once its public
+ * IDs are set; its secrets live in one Secrets Manager secret (`secretName`)
+ * as JSON: `{ "googleClientSecret": "...", "applePrivateKey": "-----BEGIN PRIVATE KEY-----..." }`.
+ * One Google OAuth client and one Apple Services ID can serve both stages.
+ */
+export interface SsoConfig {
+  google?: { clientId: string }
+  apple?: { servicesId: string; teamId: string; keyId: string }
+  secretName: string
+}
+
 export interface StageConfig {
   stage: StageName
   account: string | undefined
@@ -24,10 +36,20 @@ export interface StageConfig {
   alarmEmail?: string
   /** Extra Cognito callback URLs, e.g. localhost for testing QA auth from a laptop. */
   extraCallbackUrls: string[]
+  sso: SsoConfig
 }
 
 const env = process.env
 const optionalNumber = (value: string | undefined) => (value ? Number(value) : undefined)
+
+const sso: SsoConfig = {
+  google: env.GOOGLE_CLIENT_ID ? { clientId: env.GOOGLE_CLIENT_ID } : undefined,
+  apple:
+    env.APPLE_SERVICES_ID && env.APPLE_TEAM_ID && env.APPLE_KEY_ID
+      ? { servicesId: env.APPLE_SERVICES_ID, teamId: env.APPLE_TEAM_ID, keyId: env.APPLE_KEY_ID }
+      : undefined,
+  secretName: env.SSO_SECRET_NAME ?? 'civic/sso',
+}
 
 /**
  * QA and prod can live in the same account or separate ones; set
@@ -48,6 +70,7 @@ export const stages: Record<StageName, StageConfig> = {
     persistedOnly: false,
     alarmEmail: env.QA_ALARM_EMAIL,
     extraCallbackUrls: ['http://localhost:8081/auth/callback'],
+    sso,
   },
   prod: {
     stage: 'prod',
@@ -64,6 +87,7 @@ export const stages: Record<StageName, StageConfig> = {
     persistedOnly: true,
     alarmEmail: env.PROD_ALARM_EMAIL,
     extraCallbackUrls: [],
+    sso,
   },
 }
 

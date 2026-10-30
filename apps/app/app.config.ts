@@ -52,6 +52,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     authMode: process.env.EXPO_PUBLIC_AUTH_MODE ?? (stage === 'local' ? 'dev' : 'cognito'),
     cognitoDomain: process.env.EXPO_PUBLIC_COGNITO_DOMAIN,
     cognitoClientId: process.env.EXPO_PUBLIC_COGNITO_CLIENT_ID,
+    ssoProviders: process.env.EXPO_PUBLIC_SSO_PROVIDERS,
     eas: process.env.EAS_PROJECT_ID ? { projectId: process.env.EAS_PROJECT_ID } : undefined,
   },
 })
