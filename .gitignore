@@ -31,7 +31,8 @@ apps/desktop/release/
 # Browser automation artefacts
 .playwright-mcp/
 
-# OS / editors
+# OS / editors / local tooling
+.claude/
 .DS_Store
 .idea/
 *.log
