@@ -23,6 +23,6 @@ export async function trending(db: Database, limit: number, windowHours = 24 * 7
 }
 
 export async function topicBySlug(db: Database, slug: string): Promise<Topic | null> {
-  const [row] = await db.select().from(topics).where(eq(topics.slug, slug))
+  const [row] = await db.select().from(topics).where(eq(topics.slug, slug.toLowerCase()))
   return row ?? null
 }

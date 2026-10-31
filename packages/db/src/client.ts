@@ -8,7 +8,7 @@ import * as schema from './schema'
 
 export type DbConfig =
   | { kind: 'postgres'; url: string; maxConnections?: number; logger?: Logger }
-  | { kind: 'data-api'; resourceArn: string; secretArn: string; database: string }
+  | { kind: 'data-api'; resourceArn: string; secretArn: string; database: string; logger?: Logger }
 
 /** Both drivers expose the same query builder; callers never need to know which one is live. */
 export type Database = PgDatabase<PgQueryResultHKT, typeof schema>
@@ -51,6 +51,7 @@ export function createDb(config: DbConfig): DbHandle {
       resourceArn: config.resourceArn,
       secretArn: config.secretArn,
       database: config.database,
+      logger: config.logger,
     })
     return {
       db: db as unknown as Database,

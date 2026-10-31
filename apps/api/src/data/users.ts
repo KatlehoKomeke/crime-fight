@@ -13,23 +13,30 @@ const sanitizeHandle = (raw: string) =>
 
 /**
  * Maps an authenticated identity to a user row, provisioning one on first
- * sign-in. Avoids a separate Cognito post-confirmation Lambda.
+ * sign-in (Cognito `sub` → `users.auth_sub`). Avoids a separate Cognito
+ * post-confirmation Lambda. The name seeds the profile once and stays
+ * editable; the email follows the identity provider.
  */
 export async function resolveViewer(db: Database, identity: Identity): Promise<User | null> {
   if (identity.kind === 'dev') {
-    const [row] = await db.select().from(users).where(eq(users.handle, identity.handle))
+    const [row] = await db.select().from(users).where(eq(users.handle, identity.handle.toLowerCase()))
     return row ?? null
   }
 
+  const email = identity.email ?? null
   const [existing] = await db.select().from(users).where(eq(users.authSub, identity.sub))
-  if (existing) return existing
+  if (existing) {
+    if (existing.email === email) return existing
+    const [updated] = await db.update(users).set({ email }).where(eq(users.id, existing.id)).returning()
+    return updated ?? existing
+  }
 
   const base = sanitizeHandle(identity.preferredUsername ?? identity.email?.split('@')[0] ?? 'neighbour')
   for (let attempt = 0; attempt < 5; attempt++) {
     const handle = attempt === 0 ? base : `${base}${Math.floor(1000 + Math.random() * 9000)}`
     const [created] = await db
       .insert(users)
-      .values({ authSub: identity.sub, handle, displayName: identity.name ?? identity.preferredUsername ?? handle })
+      .values({ authSub: identity.sub, handle, email, displayName: identity.name ?? identity.preferredUsername ?? handle })
       .onConflictDoNothing()
       .returning()
     if (created) return created

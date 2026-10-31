@@ -57,6 +57,7 @@ Locally, sign-in uses **dev mode**: `/sign-in` lists demo accounts (a member, a 
 | --- | --- |
 | `pnpm codegen` | Print the API schema, then regenerate typed documents + persisted manifest (commit the result) |
 | `pnpm typecheck` / `pnpm lint` / `pnpm test` | All packages (API tests need the local DB; they use a separate `civic_test` database) |
+| `TEST_DATA_API_CLUSTER_ARN=… TEST_DATA_API_SECRET_ARN=… pnpm --filter @civic/api test` | Run the API tests through the RDS Data API (the driver Lambda uses) against a `civic_test` database on a real Aurora cluster. The Data API types parameters and results differently from local Postgres, so run this after schema or query changes. It needs AWS credentials and takes about 2 minutes. |
 | `pnpm --filter @civic/app build` | Production web export + SSR Lambda package |
 | `pnpm --filter @civic/app serve` | Serve that build locally exactly as Lambda would |
 | `pnpm --filter @civic/infra synth` | Synthesize CloudFormation for both stages |

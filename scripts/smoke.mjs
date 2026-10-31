@@ -47,17 +47,30 @@ await retry('hashed JS bundles are served', async () => {
 })
 
 const documents = JSON.parse(readFileSync(new URL('../packages/graphql/src/gql/persisted-documents.json', import.meta.url), 'utf8'))
-const [hash] = Object.entries(documents).find(([, doc]) => doc.startsWith('query Trends')) ?? []
-if (!hash) throw new Error('Trends operation not found in persisted documents')
-
-await retry('persisted GraphQL operation works end to end', async () => {
+const persisted = async (operationName) => {
+  // Fragments are printed before the operation, so match the operation anywhere.
+  const [hash] = Object.entries(documents).find(([, doc]) => new RegExp(`\\bquery ${operationName}\\b`).test(doc)) ?? []
+  if (!hash) throw new Error(`${operationName} operation not found in persisted documents`)
   const res = await fetch(`${site}/graphql`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ operationName: 'Trends', variables: {}, extensions: { persistedQuery: { version: 1, sha256Hash: hash } } }),
+    body: JSON.stringify({ operationName, variables: {}, extensions: { persistedQuery: { version: 1, sha256Hash: hash } } }),
   })
   const body = await res.json()
-  if (!Array.isArray(body?.data?.trends)) throw new Error(`unexpected response ${res.status} ${JSON.stringify(body).slice(0, 300)}`)
+  if (body.errors?.length || !body.data) throw new Error(`unexpected response ${res.status} ${JSON.stringify(body).slice(0, 300)}`)
+  return body.data
+}
+
+await retry('persisted GraphQL operation works end to end', async () => {
+  const data = await persisted('Trends')
+  if (!Array.isArray(data.trends)) throw new Error('trends missing')
+})
+
+// Reads users and compares an enum-like column through the Data API, which
+// types parameters and results differently from local Postgres.
+await retry('app shell query (trends + trusted sources) works', async () => {
+  const data = await persisted('Shell')
+  if (!Array.isArray(data.trustedSources)) throw new Error('trustedSources missing')
 })
 
 console.log(`\nSmoke test passed for ${site}`)

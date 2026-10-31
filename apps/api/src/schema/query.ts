@@ -93,7 +93,8 @@ builder.queryType({
       nullable: true,
       args: { handle: t.arg.string({ required: true }) },
       resolve: async (_root, { handle }, ctx) => {
-        const [row] = await ctx.db.select().from(schema.users).where(eq(schema.users.handle, handle.replace(/^@/, '')))
+        // Handles are stored lowercase (users_handle_lowercase), so lookups are case-insensitive.
+        const [row] = await ctx.db.select().from(schema.users).where(eq(schema.users.handle, handle.replace(/^@/, '').toLowerCase()))
         if (row) ctx.loaders.user.prime(row.id, row)
         return row ?? null
       },
@@ -110,7 +111,7 @@ builder.queryType({
       nullable: true,
       args: { slug: t.arg.string({ required: true }) },
       resolve: async (_root, { slug }, ctx) => {
-        const [row] = await ctx.db.select().from(schema.topics).where(eq(schema.topics.slug, slug.replace(/^#/, '')))
+        const [row] = await ctx.db.select().from(schema.topics).where(eq(schema.topics.slug, slug.replace(/^#/, '').toLowerCase()))
         return row ?? null
       },
     }),

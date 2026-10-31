@@ -1,17 +1,6 @@
-import { sql } from 'drizzle-orm'
-import {
-  type AnyPgColumn,
-  customType,
-  doublePrecision,
-  index,
-  integer,
-  pgEnum,
-  pgTable,
-  primaryKey,
-  text,
-  timestamp,
-  uuid,
-} from 'drizzle-orm/pg-core'
+import { ALERT_SEVERITIES, POST_KINDS, USER_ROLES } from '@civic/core'
+import { type SQL, sql } from 'drizzle-orm'
+import { type AnyPgColumn, check, doublePrecision, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 
 /*
  * Two generated columns are deliberately NOT declared here and live in
@@ -22,28 +11,38 @@ import {
  * binary geography/tsvector payloads over the RDS Data API.
  */
 
-const citext = customType<{ data: string }>({ dataType: () => 'citext' })
-
 // Millisecond precision so cursors built from JS Dates round-trip exactly.
 const ts = () => timestamp({ withTimezone: true, precision: 3 })
 const createdAt = () => ts().notNull().defaultNow()
 
-export const userRole = pgEnum('user_role', ['MEMBER', 'REPORTER', 'OFFICIAL', 'NEWSROOM', 'SUPPORT'])
-export const postKind = pgEnum('post_kind', ['UPDATE', 'ALERT', 'ADVISORY'])
-export const alertSeverity = pgEnum('alert_severity', ['INFO', 'ADVISORY', 'WARNING', 'CRITICAL'])
+/*
+ * No Postgres enums or citext: on Lambda the RDS Data API can't return citext
+ * values, and it sends parameters as text, which Postgres won't compare with an
+ * enum. Plain text with CHECK constraints keeps the same guarantees on every
+ * driver. Handles and slugs are stored lowercase, so their unique indexes stay
+ * case-insensitive.
+ */
+const oneOf = (column: AnyPgColumn, values: readonly string[]): SQL => sql`${column} in (${sql.raw(values.map((v) => `'${v}'`).join(', '))})`
+const lowercase = (column: AnyPgColumn): SQL => sql`${column} = lower(${column})`
 
-export const users = pgTable('users', {
-  id: uuid().primaryKey().defaultRandom(),
-  /** Cognito `sub`. Null for seeded/system accounts. */
-  authSub: text().unique(),
-  handle: citext().notNull().unique(),
-  displayName: text().notNull(),
-  bio: text().notNull().default(''),
-  avatarUrl: text(),
-  role: userRole().notNull().default('MEMBER'),
-  verifiedAt: ts(),
-  createdAt: createdAt(),
-})
+export const users = pgTable(
+  'users',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    /** Cognito `sub`. Null for seeded/system accounts. */
+    authSub: text().unique(),
+    handle: text().notNull().unique(),
+    displayName: text().notNull(),
+    /** From the identity provider, kept current on every sign-in. Private: never exposed through the API. */
+    email: text(),
+    bio: text().notNull().default(''),
+    avatarUrl: text(),
+    role: text({ enum: USER_ROLES }).notNull().default('MEMBER'),
+    verifiedAt: ts(),
+    createdAt: createdAt(),
+  },
+  (t) => [check('users_handle_lowercase', lowercase(t.handle)), check('users_role_valid', oneOf(t.role, USER_ROLES))],
+)
 
 export const posts = pgTable(
   'posts',
@@ -53,9 +52,9 @@ export const posts = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     replyToId: uuid().references((): AnyPgColumn => posts.id, { onDelete: 'cascade' }),
-    kind: postKind().notNull().default('UPDATE'),
+    kind: text({ enum: POST_KINDS }).notNull().default('UPDATE'),
     body: text().notNull(),
-    severity: alertSeverity(),
+    severity: text({ enum: ALERT_SEVERITIES }),
     area: text(),
     category: text(),
     lat: doublePrecision(),
@@ -73,6 +72,9 @@ export const posts = pgTable(
     index('posts_alerts_idx')
       .on(t.createdAt.desc(), t.id.desc())
       .where(sql`${t.kind} <> 'UPDATE' and ${t.deletedAt} is null`),
+    check('posts_kind_valid', oneOf(t.kind, POST_KINDS)),
+    // NULL passes a CHECK, so updates without a severity stay valid.
+    check('posts_severity_valid', oneOf(t.severity, ALERT_SEVERITIES)),
     index('posts_author_idx').on(t.authorId, t.createdAt.desc()),
     index('posts_replies_idx').on(t.replyToId, t.createdAt),
   ],
@@ -128,14 +130,18 @@ export const follows = pgTable(
   (t) => [primaryKey({ columns: [t.followerId, t.followeeId] }), index('follows_followee_idx').on(t.followeeId)],
 )
 
-export const topics = pgTable('topics', {
-  id: uuid().primaryKey().defaultRandom(),
-  slug: citext().notNull().unique(),
-  title: text().notNull(),
-  /** Display category, e.g. "Public safety", "Community", "Traffic". */
-  category: text().notNull().default('Community'),
-  createdAt: createdAt(),
-})
+export const topics = pgTable(
+  'topics',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    slug: text().notNull().unique(),
+    title: text().notNull(),
+    /** Display category, e.g. "Public safety", "Community", "Traffic". */
+    category: text().notNull().default('Community'),
+    createdAt: createdAt(),
+  },
+  (t) => [check('topics_slug_lowercase', lowercase(t.slug))],
+)
 
 export const postTopics = pgTable(
   'post_topics',

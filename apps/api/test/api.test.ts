@@ -1,13 +1,27 @@
 import { fileURLToPath } from 'node:url'
-import { createDb, type DbHandle } from '@civic/db'
+import { ExecuteStatementCommand } from '@aws-sdk/client-rds-data'
+import { createDataApiClient, createDb, type DbConfig, type DbHandle, schema } from '@civic/db'
 import { runMigrations } from '@civic/db/migrate'
 import { seed } from '@civic/db/seed'
+import { eq } from 'drizzle-orm'
 import pg from 'pg'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolveViewer } from '../src/data/users'
 import { readEnv } from '../src/env'
 import { createApi } from '../src/yoga'
 
 const TEST_URL = process.env.TEST_DATABASE_URL ?? 'postgres://civic:civic@localhost:54329/civic_test'
+/**
+ * Set both to run the suite through the RDS Data API (the driver Lambda uses)
+ * against a `civic_test` database on a real Aurora cluster. The Data API types
+ * parameters and results differently from node-postgres, so this catches
+ * queries that only fail once deployed.
+ */
+const DATA_API = process.env.TEST_DATA_API_CLUSTER_ARN && process.env.TEST_DATA_API_SECRET_ARN
+  ? { resourceArn: process.env.TEST_DATA_API_CLUSTER_ARN, secretArn: process.env.TEST_DATA_API_SECRET_ARN, database: 'civic_test' }
+  : undefined
+// Every query is an HTTPS round trip there; seeding alone takes seconds.
+if (DATA_API) vi.setConfig({ testTimeout: 60_000, hookTimeout: 180_000 })
 
 let handle: DbHandle
 let api: ReturnType<typeof createApi>
@@ -51,7 +65,15 @@ const FEED = /* GraphQL */ `
   }
 `
 
-beforeAll(async () => {
+async function ensureDatabase(): Promise<DbConfig> {
+  if (DATA_API) {
+    const client = createDataApiClient()
+    const run = (sql: string) => client.send(new ExecuteStatementCommand({ resourceArn: DATA_API.resourceArn, secretArn: DATA_API.secretArn, database: 'postgres', sql }))
+    const exists = await run(`select 1 from pg_database where datname = '${DATA_API.database}'`)
+    if (!exists.records?.length) await run(`create database "${DATA_API.database}"`)
+    client.destroy()
+    return { kind: 'data-api', ...DATA_API }
+  }
   const url = new URL(TEST_URL)
   const database = url.pathname.slice(1)
   const admin = new pg.Client({ connectionString: Object.assign(new URL(TEST_URL), { pathname: '/postgres' }).toString() })
@@ -59,9 +81,13 @@ beforeAll(async () => {
   const exists = await admin.query('select 1 from pg_database where datname = $1', [database])
   if (exists.rowCount === 0) await admin.query(`create database "${database}"`)
   await admin.end()
+  return { kind: 'postgres', url: TEST_URL }
+}
 
-  await runMigrations({ kind: 'postgres', url: TEST_URL }, fileURLToPath(new URL('../../../packages/db/migrations', import.meta.url)))
-  handle = createDb({ kind: 'postgres', url: TEST_URL, logger: { logQuery: () => void queries++ } })
+beforeAll(async () => {
+  const config = await ensureDatabase()
+  await runMigrations(config, fileURLToPath(new URL('../../../packages/db/migrations', import.meta.url)))
+  handle = createDb({ ...config, logger: { logQuery: () => void queries++ } })
   api = createApi({ db: handle.db, env: readEnv({ STAGE: 'test', AUTH_MODE: 'dev' }) })
 })
 
@@ -197,5 +223,35 @@ describe('mutations', () => {
     expect(data.createPost.topics.map((t: { slug: string }) => t.slug).sort()).toEqual(['centralstation', 'nighttrain'])
     expect(data.createPost.topics.find((t: { slug: string }) => t.slug === 'nighttrain').title).toBe('NightTrain')
     expect(data.createPost.replyTo).toEqual({ id: parentId, replyCount: 27 })
+  })
+})
+
+describe('sign-in provisioning', () => {
+  const google = { kind: 'cognito', sub: 'c0ffee00-0000-4000-8000-000000000001', email: 'Jane.Doe@gmail.com', name: 'Jane Doe' } as const
+  const usersWithSub = (sub: string) => handle.db.select().from(schema.users).where(eq(schema.users.authSub, sub))
+
+  it('creates one user per Cognito account on first sign-in and links it by sub', async () => {
+    const first = await resolveViewer(handle.db, google)
+    expect(first).toMatchObject({ authSub: google.sub, handle: 'janedoe', displayName: 'Jane Doe', email: 'Jane.Doe@gmail.com', role: 'MEMBER' })
+    const again = await resolveViewer(handle.db, google)
+    expect(again?.id).toBe(first?.id)
+    expect(await usersWithSub(google.sub)).toHaveLength(1)
+  })
+
+  it('keeps the email in step with the provider without overwriting an edited name', async () => {
+    const created = await resolveViewer(handle.db, google)
+    await handle.db.update(schema.users).set({ displayName: 'JD' }).where(eq(schema.users.id, created!.id))
+    const after = await resolveViewer(handle.db, { ...google, email: 'jane@example.org', name: 'Jane Q. Doe' })
+    expect(after).toMatchObject({ id: created!.id, email: 'jane@example.org', displayName: 'JD' })
+  })
+
+  it('gives a second account with the same email name a distinct handle', async () => {
+    const taken = await resolveViewer(handle.db, { kind: 'cognito', sub: 'c0ffee00-0000-4000-8000-000000000002', email: 'alexm@icloud.com' })
+    expect(taken?.handle).toMatch(/^alexm\d{4}$/)
+  })
+
+  it('finds users and topics regardless of case', async () => {
+    const { data } = await gql('query { user(handle: "@AlexM") { handle } topic(slug: "#SafeWalk") { slug } }')
+    expect(data).toEqual({ user: { handle: 'alexm' }, topic: { slug: 'safewalk' } })
   })
 })
