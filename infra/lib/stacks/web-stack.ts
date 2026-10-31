@@ -197,7 +197,8 @@ export class WebStack extends Stack {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
         callbackUrls: [`${siteUrl}/auth/callback`, `${scheme}://auth/callback`, ...config.extraCallbackUrls],
-        logoutUrls: [siteUrl, `${scheme}://`],
+        // The app signs out through Cognito's /logout, which only returns to these.
+        logoutUrls: [siteUrl, `${scheme}://`, ...config.extraCallbackUrls.map((url) => new URL(url).origin)],
       },
       // SSO only. Before any provider is configured, COGNITO keeps the client
       // valid, but with self sign-up off nobody can create an account through it.

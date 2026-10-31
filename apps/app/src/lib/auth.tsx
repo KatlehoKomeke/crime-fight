@@ -1,6 +1,8 @@
 import * as AuthSession from 'expo-auth-session'
+import * as WebBrowser from 'expo-web-browser'
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { getConfig, isServer, type SsoProvider } from './config'
+import { Platform } from 'react-native'
+import { getConfig, isServer, type RuntimeConfig, type SsoProvider } from './config'
 import type { AuthBridge } from './graphql/client'
 import { storage } from './storage'
 
@@ -52,6 +54,24 @@ function decodeJwt(token: string): IdTokenClaims {
   return JSON.parse(json) as IdTokenClaims
 }
 
+/**
+ * Clearing the app's tokens leaves Cognito's own session cookie on its domain,
+ * and the next sign-in could then complete as this account without asking.
+ * Cognito's /logout ends it and returns to a registered sign-out URL: the site
+ * on web (a full-page round trip), the app's scheme on native.
+ */
+async function endCognitoSession({ cognitoDomain, cognitoClientId, siteUrl }: RuntimeConfig): Promise<void> {
+  if (!cognitoDomain || !cognitoClientId) return
+  const logoutUrl = (returnTo: string) =>
+    `https://${cognitoDomain}/logout?client_id=${encodeURIComponent(cognitoClientId)}&logout_uri=${encodeURIComponent(returnTo)}`
+  if (Platform.OS === 'web') {
+    window.location.assign(logoutUrl(siteUrl))
+    return
+  }
+  const appUrl = AuthSession.makeRedirectUri()
+  await WebBrowser.openAuthSessionAsync(logoutUrl(appUrl), appUrl).catch(() => undefined)
+}
+
 function methodOf(session: Session | null): AuthContextValue['method'] {
   if (!session) return null
   if (session.kind === 'dev') return 'dev'
@@ -100,6 +120,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     scopes: ['openid', 'email', 'profile'],
     usePKCE: true,
     responseType: AuthSession.ResponseType.Code,
+    // Without it Google silently reuses the account last chosen in this browser.
+    // Cognito forwards prompt to the IdP; Apple always shows its own sign-in.
+    prompt: provider === 'google' ? AuthSession.Prompt.SelectAccount : undefined,
     extraParams: { identity_provider: COGNITO_IDP[provider] },
   })
   const cognitoDiscovery = config.authMode === 'cognito' ? discovery : null
@@ -172,12 +195,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const signOut = useCallback(async () => {
+    const federated = sessionRef.current?.kind === 'cognito'
     const refreshToken = await storage.get(REFRESH_KEY)
     if (discovery?.revocationEndpoint && refreshToken && config.cognitoClientId) {
       await AuthSession.revokeAsync({ token: refreshToken, clientId: config.cognitoClientId }, discovery).catch(() => undefined)
     }
     await persist(null)
-  }, [config.cognitoClientId, discovery, persist])
+    if (federated) await endCognitoSession(config)
+  }, [config, discovery, persist])
 
   const value = useMemo<AuthContextValue>(() => {
     let identity = 'anon'
