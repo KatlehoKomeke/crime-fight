@@ -37,9 +37,11 @@ const CLIENT_PROVIDER: Record<SsoProvider, cognito.UserPoolClientIdentityProvide
  * Requests pages through CloudFront one at a time (concurrency stays low while
  * the account's Lambda quota is small). An expired edge copy sends the request
  * on to the SSR Lambda, whose loader calls the GraphQL Lambda, so both stay warm.
+ * Two passes a minute (EventBridge's smallest interval is one minute) because
+ * an edge copy is usable for 60s at most: 30s fresh plus 30s stale.
  */
 const WARMER_SOURCE = `
-exports.handler = async () => {
+const pass = async () => {
   const log = []
   for (const path of process.env.WARM_PATHS.split(',')) {
     const started = Date.now()
@@ -52,6 +54,12 @@ exports.handler = async () => {
     }
   }
   console.log(log.join(' | '))
+}
+exports.handler = async () => {
+  const started = Date.now()
+  await pass()
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, 30000 - (Date.now() - started))))
+  await pass()
 }
 `
 
