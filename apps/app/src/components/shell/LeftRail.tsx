@@ -8,6 +8,7 @@ import { brand, fonts, layout, radius, useColors } from '@/theme'
 import { useCompose } from '../ComposeProvider'
 import { HoverLink } from '../HoverLink'
 import { Icon, type IconName } from '../Icon'
+import { useToast } from '../Toast'
 import { Avatar, Touchable, Txt } from '../ui'
 import { navItems } from './nav'
 
@@ -17,10 +18,9 @@ const OUTLINE_ONLY = new Set<IconName>(['search', 'radar', 'settings'])
 export function LeftRail({ compact }: { compact: boolean }) {
   const c = useColors()
   const pathname = usePathname()
-  const router = useRouter()
   const gate = useRequireAuth()
   const { openCompose } = useCompose()
-  const { status, signOut } = useAuth()
+  const { status } = useAuth()
   const [{ data }] = useQuery({ query: ViewerQuery, pause: status !== 'signed-in' })
   const viewer = status === 'signed-in' ? data?.viewer : null
   // `data-shell-label` hides labels below 1280px on web; native decides via `compact`.
@@ -88,50 +88,76 @@ export function LeftRail({ compact }: { compact: boolean }) {
 
         <View style={{ flex: 1 }} />
 
-        {viewer ? (
-          <Touchable
-            onPress={() => router.push(`/u/${viewer.handle}`)}
-            onLongPress={() => void signOut()}
-            accessibilityRole="button"
-            accessibilityLabel={`Signed in as ${viewer.displayName}`}
-            style={[styles.account, compact && styles.accountCompact]}
-            hoverStyle={{ backgroundColor: c.surfaceAlt }}
-          >
-            <Avatar initials={viewer.initials} url={viewer.avatarUrl} size={38} />
-            {!compact ? (
-              <View {...labelProps} style={styles.accountName}>
-                <Txt variant="smallStrong" numberOfLines={1}>
-                  {viewer.displayName}
-                </Txt>
-                <Txt variant="small" color="textMuted" numberOfLines={1}>
-                  @{viewer.handle}
-                </Txt>
-              </View>
-            ) : null}
-            {!compact ? (
-              <Pressable {...labelProps} onPress={() => void signOut()} accessibilityLabel="Sign out" hitSlop={8}>
-                <Icon name="logout" size={18} color={c.textMuted} />
-              </Pressable>
-            ) : null}
-          </Touchable>
-        ) : (
-          <Touchable
-            onPress={() => router.push('/sign-in')}
-            accessibilityRole="button"
-            accessibilityLabel="Sign in"
-            style={[styles.account, compact && styles.accountCompact, { borderColor: c.line, borderWidth: 1 }]}
-            hoverStyle={{ backgroundColor: c.surfaceAlt }}
-          >
-            <Icon name="profile" size={20} color={c.text} />
-            {!compact ? (
-              <Txt {...labelProps} variant="label">
-                Sign in
-              </Txt>
-            ) : null}
-          </Touchable>
-        )}
+        <AccountButton compact={compact} viewer={viewer ?? null} labelProps={labelProps} />
       </View>
     </View>
+  )
+}
+
+/**
+ * Sign in when signed out; Sign out (showing who) when signed in. Keyed off the
+ * session rather than the viewer query, so it flips the moment you sign in or
+ * out. While the session is still being read (always, on the server) neither
+ * action is shown, so the wrong one never flashes.
+ */
+function AccountButton({
+  compact,
+  viewer,
+  labelProps,
+}: {
+  compact: boolean
+  viewer: { handle: string; initials: string; avatarUrl?: string | null } | null
+  labelProps: object
+}) {
+  const c = useColors()
+  const router = useRouter()
+  const toast = useToast()
+  const { status, signOut } = useAuth()
+  const frame = [styles.account, compact && styles.accountCompact, { borderColor: c.line, borderWidth: 1 }]
+
+  if (status === 'loading') return <View style={[styles.account, compact && styles.accountCompact, styles.accountPlaceholder]} />
+
+  if (status === 'signed-out') {
+    return (
+      <Touchable onPress={() => router.push('/sign-in')} accessibilityRole="button" accessibilityLabel="Sign in" style={frame} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+        <Icon name="profile" size={20} color={c.text} />
+        {!compact ? (
+          <Txt {...labelProps} variant="label">
+            Sign in
+          </Txt>
+        ) : null}
+      </Touchable>
+    )
+  }
+
+  return (
+    <Touchable
+      onPress={() => void signOut().then(() => toast('You’re signed out'))}
+      accessibilityRole="button"
+      accessibilityLabel={viewer ? `Sign out of @${viewer.handle}` : 'Sign out'}
+      style={frame}
+      hoverStyle={{ backgroundColor: c.surfaceAlt }}
+    >
+      {/* Who is signed in; on the narrow rail only the sign-out icon remains. */}
+      {!compact && viewer ? (
+        <View dataSet={{ shellWide: true }}>
+          <Avatar initials={viewer.initials} url={viewer.avatarUrl} size={32} />
+        </View>
+      ) : null}
+      {!compact ? (
+        <View {...labelProps} style={styles.accountName}>
+          <Txt variant="label" numberOfLines={1}>
+            Sign out
+          </Txt>
+          {viewer ? (
+            <Txt variant="small" color="textMuted" numberOfLines={1}>
+              @{viewer.handle}
+            </Txt>
+          ) : null}
+        </View>
+      ) : null}
+      <Icon name="logout" size={20} color={c.text} />
+    </Touchable>
   )
 }
 
@@ -156,4 +182,5 @@ const styles = StyleSheet.create({
   account: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 8, borderRadius: radius.pill },
   accountCompact: { padding: 4 },
   accountName: { flex: 1, minWidth: 0 },
+  accountPlaceholder: { minHeight: 38 },
 })
