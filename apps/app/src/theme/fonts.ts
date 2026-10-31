@@ -5,15 +5,20 @@ import {
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans'
 import { SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk'
+import { FontDisplay, type FontResource } from 'expo-font'
 import { Platform } from 'react-native'
 
+// On web, show text in the fallback stack at once and swap the font in when it
+// arrives. Without it browsers hide text for up to 3s on slow connections.
+const swap = (uri: FontResource['uri']): FontResource => ({ uri, display: FontDisplay.SWAP })
+
 export const fontAssets = {
-  DMSans_400Regular,
-  DMSans_500Medium,
-  DMSans_600SemiBold,
-  DMSans_700Bold,
-  SpaceGrotesk_600SemiBold,
-  SpaceGrotesk_700Bold,
+  DMSans_400Regular: swap(DMSans_400Regular),
+  DMSans_500Medium: swap(DMSans_500Medium),
+  DMSans_600SemiBold: swap(DMSans_600SemiBold),
+  DMSans_700Bold: swap(DMSans_700Bold),
+  SpaceGrotesk_600SemiBold: swap(SpaceGrotesk_600SemiBold),
+  SpaceGrotesk_700Bold: swap(SpaceGrotesk_700Bold),
 }
 
 type FontKey = keyof typeof fontAssets
