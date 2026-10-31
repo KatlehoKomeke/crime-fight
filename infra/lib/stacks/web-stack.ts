@@ -5,6 +5,8 @@ import * as acm from 'aws-cdk-lib/aws-certificatemanager'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
 import * as cognito from 'aws-cdk-lib/aws-cognito'
+import * as events from 'aws-cdk-lib/aws-events'
+import * as eventTargets from 'aws-cdk-lib/aws-events-targets'
 import * as iam from 'aws-cdk-lib/aws-iam'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as logs from 'aws-cdk-lib/aws-logs'
@@ -30,6 +32,28 @@ const CLIENT_PROVIDER: Record<SsoProvider, cognito.UserPoolClientIdentityProvide
   google: cognito.UserPoolClientIdentityProvider.GOOGLE,
   apple: cognito.UserPoolClientIdentityProvider.APPLE,
 }
+
+/**
+ * Requests pages through CloudFront one at a time (concurrency stays low while
+ * the account's Lambda quota is small). An expired edge copy sends the request
+ * on to the SSR Lambda, whose loader calls the GraphQL Lambda, so both stay warm.
+ */
+const WARMER_SOURCE = `
+exports.handler = async () => {
+  const log = []
+  for (const path of process.env.WARM_PATHS.split(',')) {
+    const started = Date.now()
+    try {
+      const res = await fetch(process.env.SITE_URL + path, { headers: { accept: 'text/html', 'accept-encoding': 'br, gzip', 'user-agent': 'civic-warmer' } })
+      await res.arrayBuffer()
+      log.push(path + ' ' + res.status + ' ' + (res.headers.get('x-cache') || '') + ' ' + (Date.now() - started) + 'ms')
+    } catch (error) {
+      log.push(path + ' failed: ' + error)
+    }
+  }
+  console.log(log.join(' | '))
+}
+`
 
 /**
  * One CloudFront distribution serves everything on one origin:
@@ -159,9 +183,21 @@ export class WebStack extends Stack {
           origin: new origins.HttpOrigin(apiDomain, { protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY }),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+          // Honours the API's Cache-Control: signed-out GET reads are shared for
+          // ~a minute, everything else is no-store. Authorization is part of the
+          // key, so a signed-in request never gets a shared (or anyone else's) answer.
+          cachePolicy: new cloudfront.CachePolicy(this, 'ApiCache', {
+            minTtl: Duration.seconds(0),
+            defaultTtl: Duration.seconds(0),
+            maxTtl: Duration.minutes(1),
+            queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+            headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Authorization'),
+            enableAcceptEncodingBrotli: true,
+            enableAcceptEncodingGzip: true,
+          }),
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
           responseHeadersPolicy: headers,
+          compress: true,
         },
       },
     })
@@ -188,6 +224,23 @@ export class WebStack extends Stack {
 
     const siteUrl = config.domainName ? `https://${config.domainName}` : `https://${distribution.distributionDomainName}`
     const scheme = appScheme(stage)
+
+    if (config.warm) {
+      const warmer = new lambda.Function(this, 'Warmer', {
+        runtime: lambda.Runtime.NODEJS_24_X,
+        architecture: lambda.Architecture.ARM_64,
+        handler: 'index.handler',
+        code: lambda.Code.fromInline(WARMER_SOURCE),
+        memorySize: 128,
+        timeout: Duration.seconds(50),
+        environment: { SITE_URL: siteUrl, WARM_PATHS: '/,/alerts,/explore,/map' },
+        logGroup: new logs.LogGroup(this, 'WarmerLogs', { retention: logs.RetentionDays.ONE_WEEK }),
+      })
+      new events.Rule(this, 'WarmEveryMinute', {
+        schedule: events.Schedule.rate(Duration.minutes(1)),
+        targets: [new eventTargets.LambdaFunction(warmer, { retryAttempts: 0 })],
+      })
+    }
 
     const appClient = new cognito.UserPoolClient(this, 'AppClient', {
       userPool,

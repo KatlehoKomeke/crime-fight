@@ -18,6 +18,7 @@ interface Options {
   offline?: boolean
   persisted?: boolean
   fetchHeaders?: Record<string, string>
+  fetch?: typeof fetch
 }
 
 const hashOf = (document: unknown): Promise<string> => {
@@ -25,7 +26,7 @@ const hashOf = (document: unknown): Promise<string> => {
   return hash ? Promise.resolve(hash) : Promise.reject(new Error('Document has no persisted hash — run `pnpm codegen`'))
 }
 
-export function createGraphQLClient({ url, ssr, auth, offline, persisted, fetchHeaders }: Options): Client {
+export function createGraphQLClient({ url, ssr, auth, offline, persisted, fetchHeaders, fetch }: Options): Client {
   const exchanges: Exchange[] = [cacheExchange(cacheConfig), ssr]
 
   if (!offline) {
@@ -48,5 +49,6 @@ export function createGraphQLClient({ url, ssr, auth, offline, persisted, fetchH
     url,
     exchanges,
     fetchOptions: fetchHeaders ? { headers: fetchHeaders } : undefined,
+    fetch,
   })
 }

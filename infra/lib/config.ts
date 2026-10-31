@@ -37,6 +37,12 @@ export interface StageConfig {
   /** Extra Cognito callback URLs, e.g. localhost for testing QA auth from a laptop. */
   extraCallbackUrls: string[]
   sso: SsoConfig
+  /**
+   * Request the busiest pages through CloudFront every minute, keeping edge
+   * copies fresh and the SSR and GraphQL Lambdas warm. Off where the database
+   * should be allowed to pause, because the requests would keep it awake.
+   */
+  warm: boolean
 }
 
 const env = process.env
@@ -71,6 +77,7 @@ export const stages: Record<StageName, StageConfig> = {
     alarmEmail: env.QA_ALARM_EMAIL,
     extraCallbackUrls: ['http://localhost:8081/auth/callback'],
     sso,
+    warm: false,
   },
   prod: {
     stage: 'prod',
@@ -88,6 +95,7 @@ export const stages: Record<StageName, StageConfig> = {
     alarmEmail: env.PROD_ALARM_EMAIL,
     extraCallbackUrls: [],
     sso,
+    warm: true,
   },
 }
 

@@ -56,9 +56,12 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
   await ready
   const response = await scope(handle, toRequest(event))
   const headers = Object.fromEntries(response.headers)
-  // Anonymous HTML is cacheable at the edge for a few seconds; it never contains viewer data.
-  if (headers['content-type']?.includes('text/html') && !headers['cache-control']) {
-    headers['cache-control'] = 'public, max-age=0, s-maxage=10, stale-while-revalidate=60'
+  // Pages and their loader data never contain viewer data (sessions live on the
+  // device), so CloudFront may share them. 30s fresh plus 30s served stale while
+  // it refreshes keeps anonymous content at most about a minute old.
+  const shareable = headers['content-type']?.includes('text/html') || event.rawPath.startsWith('/_expo/loaders/')
+  if (shareable && response.status === 200 && !headers['cache-control']) {
+    headers['cache-control'] = 'public, max-age=0, s-maxage=30, stale-while-revalidate=30'
   }
   const stream = awslambda.HttpResponseStream.from(responseStream, {
     statusCode: response.status,
