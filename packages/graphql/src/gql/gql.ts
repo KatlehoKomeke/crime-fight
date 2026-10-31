@@ -26,6 +26,8 @@ type Documents = {
     "\n  query Shell {\n    trends(first: 4) {\n      postCount\n      topic {\n        id\n        slug\n        title\n        category\n      }\n    }\n    trustedSources(first: 3) {\n      ...UserRowFields\n    }\n  }\n": typeof types.ShellDocument,
     "\n  query Trends {\n    trends(first: 10) {\n      postCount\n      topic {\n        id\n        slug\n        title\n        category\n      }\n    }\n  }\n": typeof types.TrendsDocument,
     "\n  query Viewer {\n    viewer {\n      id\n      handle\n      displayName\n      initials\n      avatarUrl\n      verified\n      role\n    }\n  }\n": typeof types.ViewerDocument,
+    "\n  query Settings {\n    viewer {\n      id\n      handle\n      displayName\n      bio\n      email\n      initials\n      avatarUrl\n    }\n  }\n": typeof types.SettingsDocument,
+    "\n  mutation UpdateProfile($input: UpdateProfileInput!) {\n    updateProfile(input: $input) {\n      id\n      displayName\n      bio\n      initials\n    }\n  }\n": typeof types.UpdateProfileDocument,
     "\n  mutation LikePost($id: ID!) {\n    likePost(id: $id) {\n      id\n      likeCount\n      viewerHasLiked\n    }\n  }\n": typeof types.LikePostDocument,
     "\n  mutation UnlikePost($id: ID!) {\n    unlikePost(id: $id) {\n      id\n      likeCount\n      viewerHasLiked\n    }\n  }\n": typeof types.UnlikePostDocument,
     "\n  mutation RepostPost($id: ID!) {\n    repostPost(id: $id) {\n      id\n      repostCount\n      viewerHasReposted\n    }\n  }\n": typeof types.RepostPostDocument,
@@ -50,6 +52,8 @@ const documents: Documents = {
     "\n  query Shell {\n    trends(first: 4) {\n      postCount\n      topic {\n        id\n        slug\n        title\n        category\n      }\n    }\n    trustedSources(first: 3) {\n      ...UserRowFields\n    }\n  }\n": types.ShellDocument,
     "\n  query Trends {\n    trends(first: 10) {\n      postCount\n      topic {\n        id\n        slug\n        title\n        category\n      }\n    }\n  }\n": types.TrendsDocument,
     "\n  query Viewer {\n    viewer {\n      id\n      handle\n      displayName\n      initials\n      avatarUrl\n      verified\n      role\n    }\n  }\n": types.ViewerDocument,
+    "\n  query Settings {\n    viewer {\n      id\n      handle\n      displayName\n      bio\n      email\n      initials\n      avatarUrl\n    }\n  }\n": types.SettingsDocument,
+    "\n  mutation UpdateProfile($input: UpdateProfileInput!) {\n    updateProfile(input: $input) {\n      id\n      displayName\n      bio\n      initials\n    }\n  }\n": types.UpdateProfileDocument,
     "\n  mutation LikePost($id: ID!) {\n    likePost(id: $id) {\n      id\n      likeCount\n      viewerHasLiked\n    }\n  }\n": types.LikePostDocument,
     "\n  mutation UnlikePost($id: ID!) {\n    unlikePost(id: $id) {\n      id\n      likeCount\n      viewerHasLiked\n    }\n  }\n": types.UnlikePostDocument,
     "\n  mutation RepostPost($id: ID!) {\n    repostPost(id: $id) {\n      id\n      repostCount\n      viewerHasReposted\n    }\n  }\n": types.RepostPostDocument,
@@ -124,6 +128,14 @@ export function graphql(source: "\n  query Trends {\n    trends(first: 10) {\n  
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  query Viewer {\n    viewer {\n      id\n      handle\n      displayName\n      initials\n      avatarUrl\n      verified\n      role\n    }\n  }\n"): (typeof documents)["\n  query Viewer {\n    viewer {\n      id\n      handle\n      displayName\n      initials\n      avatarUrl\n      verified\n      role\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query Settings {\n    viewer {\n      id\n      handle\n      displayName\n      bio\n      email\n      initials\n      avatarUrl\n    }\n  }\n"): (typeof documents)["\n  query Settings {\n    viewer {\n      id\n      handle\n      displayName\n      bio\n      email\n      initials\n      avatarUrl\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation UpdateProfile($input: UpdateProfileInput!) {\n    updateProfile(input: $input) {\n      id\n      displayName\n      bio\n      initials\n    }\n  }\n"): (typeof documents)["\n  mutation UpdateProfile($input: UpdateProfileInput!) {\n    updateProfile(input: $input) {\n      id\n      displayName\n      bio\n      initials\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

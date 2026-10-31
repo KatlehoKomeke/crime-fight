@@ -7,7 +7,6 @@ import { PostList } from '@/components/PostList'
 import { PageHeader, Screen } from '@/components/Screen'
 import { Avatar, Button, EmptyState, Skeleton, TrustChip, Txt, VerifiedBadge } from '@/components/ui'
 import { ProfileQuery } from '@/graphql/documents'
-import { useAuth } from '@/lib/auth'
 import { useHydrate } from '@/lib/graphql/hydrate'
 import { prefetch } from '@/lib/graphql/prefetch'
 import { usePaginatedQuery } from '@/lib/graphql/use-paginated'
@@ -36,7 +35,6 @@ export default function ProfileScreen() {
   useHydrate()
   const c = useColors()
   const router = useRouter()
-  const { signOut } = useAuth()
   const handle = param(useLocalSearchParams<{ handle: string }>().handle)
   const profile = usePaginatedQuery(ProfileQuery, variables(handle), (data) => data?.user?.posts)
   const user = profile.data?.user
@@ -67,7 +65,8 @@ export default function ProfileScreen() {
                   {user ? <Avatar initials={user.initials} url={user.avatarUrl} size={88} official={user.verified && user.role !== 'MEMBER'} /> : <Skeleton width={88} height={88} style={{ borderRadius: 44 }} />}
                 </View>
                 {user?.isViewer ? (
-                  <Button label="Sign out" tone="outline" size="sm" icon="logout" onPress={() => void signOut().then(() => router.replace('/'))} />
+                  // Settings holds profile editing and sign-out; phones have no rail link to it.
+                  <Button label="Settings" tone="outline" size="sm" icon="settings" onPress={() => router.push('/settings')} />
                 ) : user ? (
                   <FollowButton userId={user.id} following={user.viewerIsFollowing} name={user.displayName} size="md" />
                 ) : null}

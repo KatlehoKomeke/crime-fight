@@ -9,6 +9,8 @@
   "sha256:78c874488ca103f8bc426e18884f859134b05221f33d0ce0aa3924434f49c76a": "fragment UserRowFields on User { avatarUrl displayName handle id initials isViewer role verified viewerIsFollowing } query Shell { trends(first: 4) { postCount topic { category id slug title } } trustedSources(first: 3) { ...UserRowFields } }",
   "sha256:9667880ed4cf106435797bddf2fafe88bca1c47a90fa0887a1e8f8feefe4cf04": "query Trends { trends(first: 10) { postCount topic { category id slug title } } }",
   "sha256:31cb6d8a21da748e8ba7eb48fadf54e2688547bea8809286f5afbbb96abbaace": "query Viewer { viewer { avatarUrl displayName handle id initials role verified } }",
+  "sha256:48e431aad5eeacbd1bc1eb74cada35c6db324cc00f9dedd5e03a4b705f750fa7": "query Settings { viewer { avatarUrl bio displayName email handle id initials } }",
+  "sha256:14361c38361924d13b5dcc02e83b547066b05053d09f24aee89e359928c23489": "mutation UpdateProfile($input: UpdateProfileInput!) { updateProfile(input: $input) { bio displayName id initials } }",
   "sha256:48a416fd6a97ae2e8832dbe03ff8812302f51432700fab815124f41d155b9240": "mutation LikePost($id: ID!) { likePost(id: $id) { id likeCount viewerHasLiked } }",
   "sha256:12346e4ab72278019f18c3346d5fbfeea942c32fdb8694e0411e468381b2f9a9": "mutation UnlikePost($id: ID!) { unlikePost(id: $id) { id likeCount viewerHasLiked } }",
   "sha256:6502b13d3dfa4e66cdbd04e1ab123eebbe22943d8d7a2b7f3b9dcd61343c273d": "mutation RepostPost($id: ID!) { repostPost(id: $id) { id repostCount viewerHasReposted } }",

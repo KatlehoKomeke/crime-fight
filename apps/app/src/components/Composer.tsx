@@ -9,7 +9,7 @@ import {
   type UserRole,
 } from '@civic/core'
 import { useMemo, useState } from 'react'
-import { Platform, StyleSheet, TextInput, View } from 'react-native'
+import { StyleSheet, TextInput, View } from 'react-native'
 import { useMutation, useQuery } from 'urql'
 import { CreatePost, ViewerQuery } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
@@ -103,7 +103,7 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
           autoFocus={autoFocus}
           accessibilityLabel={replyTo ? 'Reply text' : 'Update text'}
           maxLength={POST_MAX_LENGTH + 50}
-          style={[styles.input, compact ? styles.inputCompact : styles.inputLarge, { color: c.text }, Platform.OS === 'web' && ({ outlineStyle: 'none' } as object)]}
+          style={[styles.input, compact ? styles.inputCompact : styles.inputLarge, { color: c.text }]}
         />
 
         {findings.length ? (

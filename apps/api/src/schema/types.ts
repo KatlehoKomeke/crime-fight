@@ -50,6 +50,11 @@ UserRef.implement({
     postCount: t.int({ resolve: (user, _, ctx) => ctx.loaders.postCount.load(user.id) }),
     viewerIsFollowing: t.boolean({ resolve: (user, _, ctx) => ctx.loaders.following.load(user.id) }),
     isViewer: t.boolean({ resolve: async (user, _, ctx) => (await ctx.viewer())?.id === user.id }),
+    email: t.string({
+      nullable: true,
+      description: 'The sign-in email. Only visible to the account owner; null for everyone else.',
+      resolve: async (user, _, ctx) => ((await ctx.viewer())?.id === user.id ? user.email : null),
+    }),
     posts: t.connection({ type: PostRef, resolve: (user, args, ctx) => pagePosts(ctx.db, filters.byAuthor(user.id), args) }, PostConnection),
   }),
 })

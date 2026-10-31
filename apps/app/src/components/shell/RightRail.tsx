@@ -97,7 +97,9 @@ export function SearchBox({ initial = '' }: { initial?: string }) {
         placeholderTextColor={c.textMuted}
         returnKeyType="search"
         accessibilityLabel="Search CIVIC/ONE"
-        style={[styles.searchInput, { color: c.text }, Platform.OS === 'web' && ({ outlineStyle: 'none' } as object)]}
+        // No inline outlineStyle: globalCss drops input focus outlines, and the inline
+        // form serialises differently on server and client (a hydration mismatch).
+        style={[styles.searchInput, { color: c.text }]}
       />
     </View>
   )

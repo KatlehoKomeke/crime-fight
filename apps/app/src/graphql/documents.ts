@@ -253,6 +253,32 @@ export const ViewerQuery = graphql(`
   }
 `)
 
+// Separate from Viewer so the shell's persisted query hash stays stable.
+export const SettingsQuery = graphql(`
+  query Settings {
+    viewer {
+      id
+      handle
+      displayName
+      bio
+      email
+      initials
+      avatarUrl
+    }
+  }
+`)
+
+export const UpdateProfile = graphql(`
+  mutation UpdateProfile($input: UpdateProfileInput!) {
+    updateProfile(input: $input) {
+      id
+      displayName
+      bio
+      initials
+    }
+  }
+`)
+
 export const LikePost = graphql(`
   mutation LikePost($id: ID!) {
     likePost(id: $id) {

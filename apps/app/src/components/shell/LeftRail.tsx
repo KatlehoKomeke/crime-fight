@@ -7,9 +7,12 @@ import { useRequireAuth } from '@/lib/use-require-auth'
 import { brand, fonts, layout, radius, useColors } from '@/theme'
 import { useCompose } from '../ComposeProvider'
 import { HoverLink } from '../HoverLink'
-import { Icon } from '../Icon'
+import { Icon, type IconName } from '../Icon'
 import { Avatar, Touchable, Txt } from '../ui'
 import { navItems } from './nav'
+
+/** Icons whose filled form reads as a blob; they stay outlined when active. */
+const OUTLINE_ONLY = new Set<IconName>(['search', 'radar', 'settings'])
 
 export function LeftRail({ compact }: { compact: boolean }) {
   const c = useColors()
@@ -54,7 +57,7 @@ export function LeftRail({ compact }: { compact: boolean }) {
                 hoverStyle={{ backgroundColor: c.surfaceAlt }}
               >
                 <View>
-                  <Icon name={item.icon} size={23} color={c.text} filled={active && item.icon !== 'search' && item.icon !== 'radar'} />
+                  <Icon name={item.icon} size={23} color={c.text} filled={active && !OUTLINE_ONLY.has(item.icon)} />
                   {item.key === 'alerts' ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.bg }]} /> : null}
                 </View>
                 {!compact ? (

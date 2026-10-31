@@ -24,5 +24,7 @@ export function navItems(handle: string | null): NavItem[] {
       match: (p) => (handle ? p === `/u/${handle}` : p === '/sign-in'),
       phone: true,
     },
+    // Not in the phone tab bar (five tabs max); phones reach it from their own profile.
+    { key: 'settings', label: 'Settings', icon: 'settings', href: '/settings', match: (p) => p.startsWith('/settings') },
   ]
 }

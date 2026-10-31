@@ -169,6 +169,11 @@ type User {
   bio: String!
   createdAt: DateTime!
   displayName: String!
+
+  """
+  The sign-in email. Only visible to the account owner; null for everyone else.
+  """
+  email: String
   followerCount: Int!
   followingCount: Int!
   handle: String!

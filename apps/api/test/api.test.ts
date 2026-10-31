@@ -250,6 +250,14 @@ describe('sign-in provisioning', () => {
     expect(taken?.handle).toMatch(/^alexm\d{4}$/)
   })
 
+  it('shows an account’s email to its owner only', async () => {
+    await handle.db.update(schema.users).set({ email: 'alex@example.org' }).where(eq(schema.users.handle, 'alexm'))
+    const query = 'query { user(handle: "alexm") { email } }'
+    expect((await gql(query, {}, 'alexm')).data.user.email).toBe('alex@example.org')
+    expect((await gql(query, {}, 'jordan_o')).data.user.email).toBeNull()
+    expect((await gql(query)).data.user.email).toBeNull()
+  })
+
   it('finds users and topics regardless of case', async () => {
     const { data } = await gql('query { user(handle: "@AlexM") { handle } topic(slug: "#SafeWalk") { slug } }')
     expect(data).toEqual({ user: { handle: 'alexm' }, topic: { slug: 'safewalk' } })

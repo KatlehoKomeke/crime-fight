@@ -33,7 +33,7 @@ export const users = pgTable(
     authSub: text().unique(),
     handle: text().notNull().unique(),
     displayName: text().notNull(),
-    /** From the identity provider, kept current on every sign-in. Private: never exposed through the API. */
+    /** From the identity provider, kept current on every sign-in. The API shows it to its owner only. */
     email: text(),
     bio: text().notNull().default(''),
     avatarUrl: text(),

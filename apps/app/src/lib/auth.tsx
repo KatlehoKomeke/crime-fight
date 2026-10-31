@@ -15,6 +15,8 @@ interface AuthContextValue {
   identity: string
   bridge: AuthBridge
   mode: 'dev' | 'cognito'
+  /** How the current session signed in; null when signed out. */
+  method: SsoProvider | 'dev' | null
   /**
    * Dev mode signs in as a seeded handle; Cognito mode goes to an SSO provider.
    * Resolves false when the user closes the provider's window.
@@ -37,10 +39,25 @@ export function useAuth(): AuthContextValue {
   return value
 }
 
-function decodeJwt(token: string): { sub: string; exp: number } {
+interface IdTokenClaims {
+  sub: string
+  exp: number
+  /** Present on federated sign-ins, e.g. [{ providerName: 'Google' }]. */
+  identities?: Array<{ providerName?: string }>
+}
+
+function decodeJwt(token: string): IdTokenClaims {
   const payload = token.split('.')[1] ?? ''
   const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '='))
-  return JSON.parse(json) as { sub: string; exp: number }
+  return JSON.parse(json) as IdTokenClaims
+}
+
+function methodOf(session: Session | null): AuthContextValue['method'] {
+  if (!session) return null
+  if (session.kind === 'dev') return 'dev'
+  const provider = decodeJwt(session.idToken).identities?.[0]?.providerName
+  const match = (Object.entries(COGNITO_IDP) as Array<[SsoProvider, string]>).find(([, name]) => name === provider)
+  return match?.[0] ?? null
 }
 
 function sessionFromTokens(tokens: AuthSession.TokenResponse): Session {
@@ -172,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       identity,
       bridge,
       mode: config.authMode,
+      method: methodOf(session),
       signIn,
       signOut,
     }
