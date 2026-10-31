@@ -1,17 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  checkPrivacy,
-  coarsen,
-  createPostSchema,
-  distanceKm,
-  extractTopics,
-  formatCount,
-  formatRelativeTime,
-  hasBlockingFinding,
-  initialsFor,
-  segmentBody,
-  trustBadgeFor,
-} from './index'
+import { checkPrivacy, coarsen, distanceKm, extractTopics, formatCount, formatRelativeTime, hasBlockingFinding, initialsFor, segmentBody, trustBadgeFor } from './index'
+import { createPostSchema } from './schemas'
 
 describe('privacy', () => {
   it('blocks Luhn-valid ID numbers and card numbers', () => {

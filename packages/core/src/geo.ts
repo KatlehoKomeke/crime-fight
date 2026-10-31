@@ -1,11 +1,8 @@
-import { z } from 'zod'
-
-export const geoPointSchema = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-})
-
-export type GeoPoint = z.infer<typeof geoPointSchema>
+// Validated by geoPointSchema in ./schemas (kept separate so the app bundle has no zod).
+export interface GeoPoint {
+  lat: number
+  lng: number
+}
 
 /** Default metro centre until the viewer shares a location (Cape Town CBD). */
 export const DEFAULT_CENTER: GeoPoint = { lat: -33.9249, lng: 18.4241 }

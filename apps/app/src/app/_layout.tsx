@@ -4,8 +4,8 @@ import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { useEffect } from 'react'
 import { Platform } from 'react-native'
-import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { ComposeProvider } from '@/components/ComposeProvider'
+import { GestureRoot } from '@/components/GestureRoot'
 import { ToastProvider } from '@/components/Toast'
 import { AuthProvider } from '@/lib/auth'
 import { GraphQLProvider } from '@/lib/graphql/provider'
@@ -25,7 +25,7 @@ export default function RootLayout() {
   if (!fontsLoaded && Platform.OS !== 'web') return null
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureRoot>
       <AuthProvider>
         <GraphQLProvider>
           <LocationProvider>
@@ -38,6 +38,6 @@ export default function RootLayout() {
           </LocationProvider>
         </GraphQLProvider>
       </AuthProvider>
-    </GestureHandlerRootView>
+    </GestureRoot>
   )
 }

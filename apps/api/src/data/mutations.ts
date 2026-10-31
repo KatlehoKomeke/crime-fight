@@ -1,12 +1,5 @@
-import {
-  canPublishAlerts,
-  checkPrivacy,
-  coarsen,
-  createPostSchema,
-  extractTopics,
-  hasBlockingFinding,
-  type CreatePostInput,
-} from '@civic/core'
+import { canPublishAlerts, checkPrivacy, coarsen, extractTopics, hasBlockingFinding } from '@civic/core'
+import { createPostSchema, type CreatePostInput } from '@civic/core/schemas'
 import { type Database, type Post, schema, type User } from '@civic/db'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'

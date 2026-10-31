@@ -1,6 +1,3 @@
-import { z } from 'zod'
-import { geoPointSchema } from './geo'
-
 export const POST_MAX_LENGTH = 500
 
 export const POST_KINDS = ['UPDATE', 'ALERT', 'ADVISORY'] as const
@@ -8,26 +5,6 @@ export type PostKind = (typeof POST_KINDS)[number]
 
 export const ALERT_SEVERITIES = ['INFO', 'ADVISORY', 'WARNING', 'CRITICAL'] as const
 export type AlertSeverity = (typeof ALERT_SEVERITIES)[number]
-
-export const createPostSchema = z
-  .object({
-    body: z
-      .string()
-      .transform((value) => value.trim())
-      .pipe(z.string().min(1, 'Write something first').max(POST_MAX_LENGTH, `Keep it under ${POST_MAX_LENGTH} characters`)),
-    kind: z.enum(POST_KINDS).default('UPDATE'),
-    severity: z.enum(ALERT_SEVERITIES).nullish(),
-    area: z.string().trim().max(60).nullish(),
-    category: z.string().trim().max(40).nullish(),
-    location: geoPointSchema.nullish(),
-    replyToId: z.uuid().nullish(),
-  })
-  .refine((input) => input.kind === 'UPDATE' || input.severity, {
-    message: 'Alerts and advisories need a severity',
-    path: ['severity'],
-  })
-
-export type CreatePostInput = z.input<typeof createPostSchema>
 
 const HASHTAG = /(^|[^\p{L}\p{N}_])#([\p{L}\p{N}_]{2,40})/gu
 
