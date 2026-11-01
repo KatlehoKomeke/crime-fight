@@ -221,7 +221,7 @@ export class WebStack extends Stack {
         code: lambda.Code.fromInline(WARMER_SOURCE),
         memorySize: 128,
         timeout: Duration.seconds(30),
-        environment: { SITE_URL: siteUrl, WARM_PATHS: '/,/alerts,/explore,/map' },
+        environment: { SITE_URL: siteUrl, WARM_PATHS: '/,/notifications,/explore,/map' },
         logGroup: new logs.LogGroup(this, 'WarmerLogs', { retention: logs.RetentionDays.ONE_WEEK }),
       })
       new events.Rule(this, 'WarmEveryMinute', {

@@ -140,6 +140,40 @@ type Mutation {
   updateProfile(input: UpdateProfileInput!): User!
 }
 
+"""
+An official alert near the viewer, or someone replying to, liking, reposting or following them.
+"""
+type Notification {
+  """The alert’s author, or whoever replied, liked, reposted or followed."""
+  actor: User!
+  createdAt: DateTime!
+  id: ID!
+  kind: NotificationKind!
+
+  """
+  The alert, the reply, or the viewer’s post that was liked or reposted. Null for follows.
+  """
+  post: Post
+}
+
+type NotificationConnection {
+  edges: [NotificationEdge!]!
+  pageInfo: PageInfo!
+}
+
+type NotificationEdge {
+  cursor: String!
+  node: Notification!
+}
+
+enum NotificationKind {
+  ALERT
+  FOLLOW
+  LIKE
+  REPLY
+  REPOST
+}
+
 type PageInfo {
   endCursor: String
   hasNextPage: Boolean!
@@ -189,9 +223,6 @@ enum PostKind {
 }
 
 type Query {
-  """Official alerts and advisories near a point, plus citywide ones."""
-  alerts(after: String, before: String, first: Int, last: Int, near: GeoInput, radiusKm: Float): PostConnection!
-
   """
   One of your conversations; null if it doesn’t exist or you’re not in it.
   """
@@ -211,8 +242,18 @@ type Query {
     radiusKm: Float
   ): PostConnection!
 
+  """
+  When the newest of `notifications` with the same arguments happened, or null if there are none. Enough for an unread marker without loading the list.
+  """
+  latestNotificationAt(near: GeoInput, radiusKm: Float): DateTime
+
   """People you can message: everyone you follow who follows you back."""
   messageContacts(first: Int, query: String): [User!]!
+
+  """
+  Official alerts and advisories near a point (plus citywide ones) and, when signed in, replies, likes, reposts and follows from other people. Newest first.
+  """
+  notifications(after: String, before: String, first: Int, last: Int, near: GeoInput, radiusKm: Float): NotificationConnection!
   post(id: ID!): Post
   savedPosts(after: String, before: String, first: Int, last: Int): PostConnection!
   search(after: String, before: String, first: Int, last: Int, query: String!): PostConnection!

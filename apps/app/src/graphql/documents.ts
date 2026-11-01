@@ -85,13 +85,27 @@ export const FeedQuery = graphql(`
   }
 `)
 
-export const AlertsQuery = graphql(`
-  query Alerts($near: GeoInput, $radiusKm: Float, $first: Int!, $after: String) {
-    alerts(near: $near, radiusKm: $radiusKm, first: $first, after: $after) {
+export const NotificationsQuery = graphql(`
+  query Notifications($near: GeoInput, $radiusKm: Float, $first: Int!, $after: String) {
+    notifications(near: $near, radiusKm: $radiusKm, first: $first, after: $after) {
       edges {
         cursor
         node {
-          ...PostCardFields
+          id
+          kind
+          createdAt
+          actor {
+            id
+            handle
+            displayName
+            initials
+            avatarUrl
+            verified
+            role
+          }
+          post {
+            ...PostCardFields
+          }
         }
       }
       pageInfo {
@@ -99,6 +113,12 @@ export const AlertsQuery = graphql(`
         endCursor
       }
     }
+  }
+`)
+
+export const LatestNotificationQuery = graphql(`
+  query LatestNotification($near: GeoInput, $radiusKm: Float) {
+    latestNotificationAt(near: $near, radiusKm: $radiusKm)
   }
 `)
 

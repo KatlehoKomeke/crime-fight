@@ -21,7 +21,7 @@ export function useNear(): LocationContextValue {
 }
 
 /**
- * The viewer's reference point for Nearby/Alerts. Always coarsened to ~1 km
+ * The viewer's reference point for Nearby/Notifications. Always coarsened to ~1 km
  * before it leaves the device — and identical coarse points share cache keys.
  */
 export function LocationProvider({ children }: { children: ReactNode }) {

@@ -13,7 +13,7 @@ export function feedVariables(kind: FeedKind, near: GeoPoint) {
   return kind === 'NEARBY' ? { kind, near, radiusKm: DEFAULT_RADIUS_KM, first: PAGE_SIZE } : { kind, first: PAGE_SIZE }
 }
 
-export function alertsVariables(near: GeoPoint) {
+export function notificationsVariables(near: GeoPoint) {
   return { near, radiusKm: DEFAULT_RADIUS_KM, first: PAGE_SIZE }
 }
 

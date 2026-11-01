@@ -27,6 +27,14 @@ const toggle = (flag: string, counter: string | null, on: boolean) => (args: Arg
   return result
 }
 
+/** When the first item of a cached Notifications page happened; null if the page is empty. */
+const newestNotification = (cache: Cache, fieldKey: string) => {
+  const connection = cache.resolve('Query', fieldKey) as string | null
+  const edges = (connection ? cache.resolve(connection, 'edges') : null) as string[] | null
+  const node = edges?.[0] ? (cache.resolve(edges[0], 'node') as string | null) : null
+  return node ? (cache.resolve(node, 'createdAt') as string | null) : null
+}
+
 const follow = (args: Args, cache: Cache, on: boolean) => {
   const ref = { __typename: 'User', id: args.id }
   const followerCount = nextCount(Number(cache.resolve(ref, 'followerCount') ?? 0), Boolean(cache.resolve(ref, 'viewerIsFollowing')), on)
@@ -82,6 +90,8 @@ export const cacheConfig: CacheExchangeOpts = {
     PageInfo: () => null,
     PostConnection: () => null,
     PostEdge: () => null,
+    NotificationConnection: () => null,
+    NotificationEdge: () => null,
     ConversationConnection: () => null,
     ConversationEdge: () => null,
     MessageConnection: () => null,
@@ -91,7 +101,7 @@ export const cacheConfig: CacheExchangeOpts = {
   resolvers: {
     Query: {
       feed: relayPagination(),
-      alerts: relayPagination(),
+      notifications: relayPagination(),
       search: relayPagination(),
       savedPosts: relayPagination(),
       conversations: relayPagination(),
@@ -113,12 +123,25 @@ export const cacheConfig: CacheExchangeOpts = {
     unfollowUser: (args, cache) => follow(args as Args, cache, false),
   },
   updates: {
+    Query: {
+      // Something newer than a cached Notifications list starts with: refetch the list (right away if it's on screen).
+      latestNotificationAt: (result, _args, cache) => {
+        const latest = result.latestNotificationAt as string | null
+        if (!latest) return
+        const behind = cache.inspectFields('Query').some((field) => {
+          if (field.fieldName !== 'notifications' || field.arguments?.after) return false
+          const newest = newestNotification(cache, field.fieldKey)
+          return !newest || Date.parse(latest) > Date.parse(newest)
+        })
+        if (behind) invalidateField(cache, 'Query', 'notifications')
+      },
+    },
     Mutation: {
       createPost: (result, _args, cache) => {
         const post = result.createPost as { replyTo?: { id: string } | null } | undefined
         if (post?.replyTo) cache.invalidate({ __typename: 'Post', id: post.replyTo.id }, 'replies')
         invalidateField(cache, 'Query', 'feed')
-        invalidateField(cache, 'Query', 'alerts')
+        invalidateField(cache, 'Query', 'notifications')
       },
       deletePost: (_result, args, cache) => cache.invalidate({ __typename: 'Post', id: (args as Args).id }),
       savePost: (_result, _args, cache) => invalidateField(cache, 'Query', 'savedPosts'),

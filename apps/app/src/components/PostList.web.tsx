@@ -1,16 +1,20 @@
-import { type ComponentRef, useEffect, useRef } from 'react'
+import { type ComponentRef, Fragment, useEffect, useRef } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 import { useColors } from '@/theme'
 import { PostCard } from './PostCard'
-import type { PostListProps } from './PostList.types'
+import type { FeedListProps, PostListProps } from './PostList.types'
 import { Button, EmptyState, PostSkeleton } from './ui'
+
+export function PostList(props: PostListProps) {
+  return <FeedList {...props} renderItem={(post) => <PostCard post={post} />} />
+}
 
 /**
  * Web: plain document flow (no nested scroll container) so the page scrolls
  * natively, sticky headers work, and every post is real HTML for crawlers.
  * An IntersectionObserver sentinel drives infinite scroll.
  */
-export function PostList({ nodes, loading, loadingMore, hasMore, onEndReached, onRefresh, error, header, empty }: PostListProps) {
+export function FeedList<Node extends { id: string }>({ nodes, renderItem, loading, loadingMore, hasMore, onEndReached, onRefresh, error, header, empty }: FeedListProps<Node>) {
   const c = useColors()
   const sentinel = useRef<ComponentRef<typeof View>>(null)
   const latest = useRef(onEndReached)
@@ -32,8 +36,8 @@ export function PostList({ nodes, loading, loadingMore, hasMore, onEndReached, o
   return (
     <View role="feed" aria-busy={loading || loadingMore}>
       {header}
-      {nodes.map((post) => (
-        <PostCard key={post.id} post={post} />
+      {nodes.map((node) => (
+        <Fragment key={node.id}>{renderItem(node)}</Fragment>
       ))}
       {loading && nodes.length === 0 ? [0, 1, 2, 3].map((i) => <PostSkeleton key={i} />) : null}
       {!loading && nodes.length === 0 && error ? (

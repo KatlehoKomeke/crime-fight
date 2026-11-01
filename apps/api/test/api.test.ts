@@ -163,14 +163,87 @@ describe('feed', () => {
   })
 })
 
-describe('alerts, trends and sources', () => {
-  it('returns only official alerts and advisories, including citywide ones', async () => {
-    const { data } = await gql(`query { alerts(near: { lat: -33.9249, lng: 18.4241 }, radiusKm: 5) { edges { node { kind area } } } }`)
-    const nodes = data.alerts.edges.map((e: { node: { kind: string; area: string } }) => e.node)
-    expect(nodes.every((n: { kind: string }) => n.kind !== 'UPDATE')).toBe(true)
-    expect(nodes.map((n: { area: string }) => n.area)).toContain('Citywide')
+describe('notifications', () => {
+  const NOTIFICATIONS = /* GraphQL */ `
+    query Notifications($near: GeoInput, $radiusKm: Float, $first: Int, $after: String) {
+      notifications(near: $near, radiusKm: $radiusKm, first: $first, after: $after) {
+        edges { node { id kind actor { handle } post { kind area body } } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `
+  type Node = { id: string; kind: string; actor: { handle: string }; post: { kind: string; area: string; body: string } | null }
+  const nodesOf = (result: GqlResult<{ notifications: { edges: Array<{ node: Node }> } }>) => result.data.notifications.edges.map((e) => e.node)
+
+  it('shows anonymous visitors official alerts and advisories only, including citywide ones', async () => {
+    const nodes = nodesOf(await gql(NOTIFICATIONS, { near: { lat: -33.9249, lng: 18.4241 }, radiusKm: 5, first: 50 }))
+    expect(nodes.length).toBeGreaterThan(0)
+    expect(nodes.every((n) => n.kind === 'ALERT' && n.post?.kind !== 'UPDATE')).toBe(true)
+    expect(nodes.map((n) => n.post?.area)).toContain('Citywide')
   })
 
+  it('adds replies, likes, reposts and follows from other people, newest first', async () => {
+    const create = `mutation($input: CreatePostInput!) { createPost(input: $input) { id author { id } } }`
+    const mine = (await gql(create, { input: { body: 'Streetlight out on Albert Road' } }, 'alexm')).data.createPost
+    await gql(`mutation($id: ID!) { likePost(id: $id) { id } }`, { id: mine.id }, 'jordan_o')
+    await gql(`mutation($id: ID!) { repostPost(id: $id) { id } }`, { id: mine.id }, 'thandi_m')
+    await gql(create, { input: { body: 'Logged it with the City too', replyToId: mine.id } }, 'thandi_m')
+    await gql(`mutation($id: ID!) { followUser(id: $id) { id } }`, { id: mine.author.id }, 'jordan_o')
+    // Your own actions never notify you.
+    await gql(`mutation($id: ID!) { likePost(id: $id) { id } }`, { id: mine.id }, 'alexm')
+    await gql(create, { input: { body: 'Update: fixed', replyToId: mine.id } }, 'alexm')
+
+    const nodes = nodesOf(await gql(NOTIFICATIONS, { first: 50 }, 'alexm'))
+    expect(nodes.slice(0, 4).map((n) => [n.kind, n.actor.handle, n.post?.body ?? null])).toEqual([
+      ['FOLLOW', 'jordan_o', null],
+      ['REPLY', 'thandi_m', 'Logged it with the City too'],
+      ['REPOST', 'thandi_m', 'Streetlight out on Albert Road'],
+      ['LIKE', 'jordan_o', 'Streetlight out on Albert Road'],
+    ])
+    expect(nodes.slice(4).every((n) => n.kind === 'ALERT')).toBe(true)
+    expect(nodes.filter((n) => n.actor.handle === 'alexm')).toEqual([])
+  })
+
+  it('pages through alerts and activity together without gaps or repeats', async () => {
+    // jordan_o has a seeded reply from harbor_watch to merge with the four seeded alerts.
+    const all = nodesOf(await gql(NOTIFICATIONS, { first: 50 }, 'jordan_o')).map((n) => n.id)
+    expect(all).toHaveLength(5)
+    const ids: string[] = []
+    let after: string | null = null
+    do {
+      const page: GqlResult<{ notifications: { edges: Array<{ node: Node }>; pageInfo: { hasNextPage: boolean; endCursor: string } } }> = await gql(
+        NOTIFICATIONS,
+        { first: 2, after },
+        'jordan_o',
+      )
+      ids.push(...nodesOf(page).map((n) => n.id))
+      after = page.data.notifications.pageInfo.hasNextPage ? page.data.notifications.pageInfo.endCursor : null
+    } while (after)
+    expect(ids).toEqual(all)
+  })
+
+  it('reports when the newest one happened, for an unread marker', async () => {
+    const LATEST = /* GraphQL */ `
+      query { latestNotificationAt notifications(first: 1) { edges { node { createdAt } } } }
+    `
+    const newest = (result: GqlResult<{ latestNotificationAt: string | null; notifications: { edges: Array<{ node: { createdAt: string } }> } }>) => {
+      expect(result.data.latestNotificationAt).toBe(result.data.notifications.edges[0]?.node.createdAt ?? null)
+      return result.data.latestNotificationAt!
+    }
+    const anonymous = newest(await gql(LATEST))
+    const before = newest(await gql(LATEST, {}, 'jordan_o'))
+
+    const { data } = await gql(`{ user(handle: "jordan_o") { posts(first: 1) { edges { node { id } } } } }`)
+    const reply = { body: 'Seen this too', replyToId: data.user.posts.edges[0].node.id }
+    await gql(`mutation($input: CreatePostInput!) { createPost(input: $input) { id } }`, { input: reply }, 'alexm')
+
+    expect(Date.parse(newest(await gql(LATEST, {}, 'jordan_o')))).toBeGreaterThan(Date.parse(before))
+    // Activity is private: signed out, only new alerts move it.
+    expect(newest(await gql(LATEST))).toBe(anonymous)
+  })
+})
+
+describe('trends and sources', () => {
   it('ranks trends by volume and hides already-followed sources', async () => {
     const trends = await gql(`{ trends(first: 3) { postCount topic { slug title } } }`)
     const counts = trends.data.trends.map((t: { postCount: number }) => t.postCount)

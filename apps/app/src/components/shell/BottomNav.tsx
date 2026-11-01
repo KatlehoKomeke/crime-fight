@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useQuery } from 'urql'
 import { ViewerQuery } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
+import { useUnreadNotifications } from '@/lib/unread-notifications'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { brand, fixed, useColors } from '@/theme'
 import { useCompose } from '../ComposeProvider'
@@ -14,6 +15,7 @@ import { navItems } from './nav'
 export function BottomNav() {
   const c = useColors()
   const pathname = usePathname()
+  const unread = useUnreadNotifications()
   const insets = useSafeAreaInsets()
   const { status } = useAuth()
   const gate = useRequireAuth()
@@ -44,11 +46,12 @@ export function BottomNav() {
       >
         {items.map((item) => {
           const active = item.match(pathname)
+          const dot = item.key === 'notifications' && unread
           return (
             <Link key={item.key} href={item.href as never} asChild>
-              <Pressable accessibilityLabel={item.label} accessibilityState={{ selected: active }} aria-current={active ? 'page' : undefined} style={styles.item}>
+              <Pressable accessibilityLabel={dot ? `${item.label} (new)` : item.label} accessibilityState={{ selected: active }} aria-current={active ? 'page' : undefined} style={styles.item}>
                 <Icon name={item.icon} size={24} color={active ? c.accentText : c.text} filled={active && item.icon !== 'search' && item.icon !== 'radar'} />
-                {item.key === 'alerts' ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.surface }]} /> : null}
+                {dot ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.surface }]} /> : null}
               </Pressable>
             </Link>
           )

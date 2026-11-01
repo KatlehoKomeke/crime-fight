@@ -2,8 +2,9 @@ import type { PostCardFieldsFragment } from '@civic/graphql'
 import type { ReactElement } from 'react'
 import type { CombinedError } from 'urql'
 
-export interface PostListProps {
-  nodes: PostCardFieldsFragment[]
+export interface FeedListProps<Node extends { id: string }> {
+  nodes: Node[]
+  renderItem: (node: Node) => ReactElement | null
   loading: boolean
   loadingMore: boolean
   hasMore: boolean
@@ -14,3 +15,5 @@ export interface PostListProps {
   header?: ReactElement | null
   empty?: ReactElement
 }
+
+export type PostListProps = Omit<FeedListProps<PostCardFieldsFragment>, 'renderItem'>

@@ -1,11 +1,27 @@
 import { ActivityIndicator, FlatList, RefreshControl, View } from 'react-native'
 import { useColors } from '@/theme'
 import { PostCard } from './PostCard'
-import type { PostListProps } from './PostList.types'
+import type { FeedListProps, PostListProps } from './PostList.types'
 import { Button, EmptyState, PostSkeleton } from './ui'
 
+export function PostList(props: PostListProps) {
+  return <FeedList {...props} renderItem={(post) => <PostCard post={post} />} />
+}
+
 /** Native: virtualised list with pull-to-refresh and infinite scroll. */
-export function PostList({ nodes, loading, loadingMore, hasMore, onEndReached, onRefresh, refreshing, error, header, empty }: PostListProps) {
+export function FeedList<Node extends { id: string }>({
+  nodes,
+  renderItem,
+  loading,
+  loadingMore,
+  hasMore,
+  onEndReached,
+  onRefresh,
+  refreshing,
+  error,
+  header,
+  empty,
+}: FeedListProps<Node>) {
   const c = useColors()
   const emptyState = () => {
     if (loading) {
@@ -25,8 +41,8 @@ export function PostList({ nodes, loading, loadingMore, hasMore, onEndReached, o
   return (
     <FlatList
       data={nodes}
-      keyExtractor={(post) => post.id}
-      renderItem={({ item }) => <PostCard post={item} />}
+      keyExtractor={(node) => node.id}
+      renderItem={({ item }) => renderItem(item)}
       ListHeaderComponent={header ?? undefined}
       ListEmptyComponent={emptyState()}
       ListFooterComponent={loadingMore ? <ActivityIndicator style={{ padding: 24 }} color={c.textMuted} /> : undefined}

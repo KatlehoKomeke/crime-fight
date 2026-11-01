@@ -4,6 +4,7 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-
 import { useQuery } from 'urql'
 import { ViewerQuery } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
+import { useUnreadNotifications } from '@/lib/unread-notifications'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { brand, fonts, layout, radius, useColors } from '@/theme'
 import { useCompose } from '../ComposeProvider'
@@ -20,6 +21,7 @@ const OUTLINE_ONLY = new Set<IconName>(['search', 'radar', 'settings', 'mail'])
 export function LeftRail({ compact }: { compact: boolean }) {
   const c = useColors()
   const pathname = usePathname()
+  const newNotifications = useUnreadNotifications()
   const gate = useRequireAuth()
   const { openCompose } = useCompose()
   const { status } = useAuth()
@@ -48,12 +50,13 @@ export function LeftRail({ compact }: { compact: boolean }) {
         <View style={styles.nav} role="navigation" aria-label="Main">
           {navItems(viewer?.handle ?? null).map((item) => {
             const active = item.match(pathname)
+            const dot = item.key === 'notifications' && newNotifications
             return (
               <HoverLink
                 key={item.key}
                 href={item.href as never}
                 dataSet={{ railItem: true }}
-                accessibilityLabel={item.label}
+                accessibilityLabel={dot ? `${item.label} (new)` : item.label}
                 accessibilityState={{ selected: active }}
                 aria-current={active ? 'page' : undefined}
                 style={[styles.navItem, compact && styles.navItemCompact, active && { backgroundColor: c.surfaceAlt }]}
@@ -61,7 +64,7 @@ export function LeftRail({ compact }: { compact: boolean }) {
               >
                 <View>
                   <Icon name={item.icon} size={23} color={c.text} filled={active && !OUTLINE_ONLY.has(item.icon)} />
-                  {item.key === 'alerts' ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.bg }]} /> : null}
+                  {dot ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.bg }]} /> : null}
                   {item.key === 'messages' ? <UnreadBadge count={unread} /> : null}
                 </View>
                 {!compact ? (

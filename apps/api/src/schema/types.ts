@@ -1,6 +1,7 @@
 import { ALERT_SEVERITIES, initialsFor, POST_KINDS, TRUST_BADGES, trustBadgeFor, USER_ROLES } from '@civic/core'
 import type { Post, PostMedia, Topic, User } from '@civic/db'
 import type { Trend } from '../data/topics'
+import { NOTIFICATION_KINDS, type Notification } from '../data/notifications'
 import { filters, pagePosts, pageReplies } from '../data/posts'
 import { builder } from './builder'
 
@@ -12,6 +13,7 @@ export const TrustBadge = builder.enumType('TrustBadge', {
   description: 'Derived from the author’s verified role; cannot be set by the author.',
 })
 export const FeedKind = builder.enumType('FeedKind', { values: ['FOR_YOU', 'NEARBY', 'FOLLOWING'] as const })
+export const NotificationKind = builder.enumType('NotificationKind', { values: NOTIFICATION_KINDS })
 
 export const GeoPoint = builder.objectRef<{ lat: number; lng: number }>('GeoPoint').implement({
   fields: (t) => ({ lat: t.exposeFloat('lat'), lng: t.exposeFloat('lng') }),
@@ -26,8 +28,10 @@ export const PostRef = builder.objectRef<Post>('Post')
 export const TopicRef = builder.objectRef<Topic>('Topic')
 export const MediaRef = builder.objectRef<PostMedia>('Media')
 export const TrendRef = builder.objectRef<Trend>('Trend')
+export const NotificationRef = builder.objectRef<Notification>('Notification')
 
 export const PostConnection = builder.connectionObject({ type: PostRef, name: 'PostConnection' }, { name: 'PostEdge' })
+export const NotificationConnection = builder.connectionObject({ type: NotificationRef, name: 'NotificationConnection' }, { name: 'NotificationEdge' })
 
 UserRef.implement({
   fields: (t) => ({
@@ -133,6 +137,30 @@ TrendRef.implement({
   fields: (t) => ({
     topic: t.field({ type: TopicRef, resolve: (trend) => trend.topic }),
     postCount: t.exposeInt('postCount'),
+  }),
+})
+
+NotificationRef.implement({
+  description: 'An official alert near the viewer, or someone replying to, liking, reposting or following them.',
+  fields: (t) => ({
+    id: t.exposeID('id'),
+    kind: t.field({ type: NotificationKind, resolve: (notification) => notification.kind }),
+    createdAt: t.field({ type: 'DateTime', resolve: (notification) => notification.createdAt }),
+    actor: t.field({
+      type: UserRef,
+      description: 'The alert’s author, or whoever replied, liked, reposted or followed.',
+      resolve: async (notification, _, ctx) => {
+        const actor = await ctx.loaders.user.load(notification.actorId)
+        if (!actor) throw new Error(`Actor ${notification.actorId} missing`)
+        return actor
+      },
+    }),
+    post: t.field({
+      type: PostRef,
+      nullable: true,
+      description: 'The alert, the reply, or the viewer’s post that was liked or reposted. Null for follows.',
+      resolve: (notification, _, ctx) => (notification.postId ? ctx.loaders.post.load(notification.postId) : null),
+    }),
   }),
 })
 

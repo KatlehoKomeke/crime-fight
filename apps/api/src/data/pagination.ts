@@ -26,10 +26,10 @@ export function encodeCursor(row: { createdAt: Date | string; id: string }): str
   return Buffer.from(JSON.stringify([createdAt, row.id])).toString('base64url')
 }
 
-export function decodeCursor(cursor: string): Cursor {
+export function decodeCursor(cursor: string, idPattern = /^[0-9a-f-]{36}$/i): Cursor {
   try {
     const [createdAt, id] = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as [string, string]
-    if (Number.isNaN(Date.parse(createdAt)) || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('bad cursor')
+    if (Number.isNaN(Date.parse(createdAt)) || !idPattern.test(id)) throw new Error('bad cursor')
     return { createdAt, id }
   } catch {
     throw apiError('BAD_USER_INPUT', 'Invalid pagination cursor')
