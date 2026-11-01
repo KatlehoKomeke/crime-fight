@@ -58,5 +58,7 @@ textarea,input{caret-color:var(--c-text)}
 [data-pulse]{animation:civic-pulse 2s infinite}
 @keyframes civic-shimmer{0%{opacity:.55}50%{opacity:1}100%{opacity:.55}}
 [data-skeleton]{animation:civic-shimmer 1.4s ease-in-out infinite}
+@keyframes civic-fade-in{from{opacity:0}to{opacity:1}}
+[data-delayed-in]{animation:civic-fade-in .2s ease-out .15s both}
 @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 `

@@ -1,5 +1,6 @@
 import { Link, usePathname, useRouter } from 'expo-router'
-import { Platform, Pressable, StyleSheet, View } from 'react-native'
+import { useState } from 'react'
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native'
 import { useQuery } from 'urql'
 import { ViewerQuery } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
@@ -116,6 +117,7 @@ function AccountButton({
   const router = useRouter()
   const toast = useToast()
   const { status, signOut } = useAuth()
+  const [signingOut, setSigningOut] = useState(false)
   const frame = [styles.account, compact && styles.accountCompact, { borderColor: c.line, borderWidth: 1 }]
 
   if (status === 'loading') return <View style={[styles.account, compact && styles.accountCompact, styles.accountPlaceholder]} />
@@ -135,9 +137,16 @@ function AccountButton({
 
   return (
     <Touchable
-      onPress={() => void signOut().then(() => toast('You’re signed out'))}
+      onPress={() => {
+        setSigningOut(true)
+        void signOut()
+          .then(() => toast('You’re signed out'))
+          .finally(() => setSigningOut(false))
+      }}
+      disabled={signingOut}
       accessibilityRole="button"
       accessibilityLabel={viewer ? `Sign out of @${viewer.handle}` : 'Sign out'}
+      accessibilityState={{ busy: signingOut }}
       style={frame}
       hoverStyle={{ backgroundColor: c.surfaceAlt }}
     >
@@ -159,7 +168,7 @@ function AccountButton({
           ) : null}
         </View>
       ) : null}
-      <Icon name="logout" size={20} color={c.text} />
+      {signingOut ? <ActivityIndicator size="small" color={c.text} style={{ width: 20 }} /> : <Icon name="logout" size={20} color={c.text} />}
     </Touchable>
   )
 }

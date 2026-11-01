@@ -57,7 +57,17 @@ export function RightRail() {
             Trusted sources
           </Txt>
           <View style={{ paddingHorizontal: 14, paddingBottom: 6 }}>
-            {data?.trustedSources.map((user) => <UserRow key={user.id} user={user} dense />)}
+            {data
+              ? data.trustedSources.map((user) => <UserRow key={user.id} user={user} dense />)
+              : [0, 1, 2].map((i) => (
+                  <View key={i} style={styles.sourceSkeleton}>
+                    <Skeleton width={36} height={36} style={{ borderRadius: 18 }} />
+                    <View style={{ flex: 1, gap: 6 }}>
+                      <Skeleton width="55%" />
+                      <Skeleton width="35%" height={9} />
+                    </View>
+                  </View>
+                ))}
           </View>
         </Card>
 
@@ -137,6 +147,7 @@ const styles = StyleSheet.create({
   emergency: { padding: 16 },
   emergencyHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   trend: { paddingVertical: 10, paddingHorizontal: 14 },
+  sourceSkeleton: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7 },
   more: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 15, fontFamily: fonts.semibold, fontSize: 13 },
   footer: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 6, paddingVertical: 14, paddingHorizontal: 5 },
 })

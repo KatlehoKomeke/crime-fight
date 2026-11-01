@@ -4,7 +4,7 @@ import * as Haptics from 'expo-haptics'
 import { Image } from 'expo-image'
 import { Link, useRouter } from 'expo-router'
 import { memo, useState } from 'react'
-import { Modal, Platform, Pressable, Share, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Modal, Platform, Pressable, Share, StyleSheet, View } from 'react-native'
 import { useMutation } from 'urql'
 import { DeletePost, LikePost, RepostPost, SavePost, UnlikePost, UnrepostPost, UnsavePost } from '@/graphql/documents'
 import { getConfig } from '@/lib/config'
@@ -26,12 +26,15 @@ export const PostCard = memo(function PostCard({ post, variant = 'feed' }: { pos
   const href = `/post/${post.id}` as const
   const detail = variant === 'detail'
   const official = OFFICIAL_ROLES.has(post.author.role) && post.author.verified
+  const [deleting, setDeleting] = useState(false)
 
   return (
     // The whole card opens the post; the timestamp is the crawlable/accessible link.
     <Pressable
       onPress={detail ? undefined : () => router.push(href)}
-      style={({ hovered }) => [styles.post, { borderBottomColor: c.line }, hovered && !detail && { backgroundColor: c.bg }]}
+      disabled={deleting}
+      accessibilityState={{ busy: deleting }}
+      style={({ hovered }) => [styles.post, { borderBottomColor: c.line }, hovered && !detail && !deleting && { backgroundColor: c.bg }, deleting && styles.deleting]}
     >
       <Link href={`/u/${post.author.handle}`} asChild>
         <Pressable accessibilityLabel={`${post.author.displayName} profile`}>
@@ -55,7 +58,7 @@ export const PostCard = memo(function PostCard({ post, variant = 'feed' }: { pos
               </Txt>
             </Link>
           </View>
-          <PostMenu post={post} />
+          <PostMenu post={post} deleting={deleting} onDeleting={setDeleting} />
         </View>
 
         {post.replyTo ? (
@@ -243,7 +246,7 @@ function Action({
   )
 }
 
-function PostMenu({ post }: { post: Post }) {
+function PostMenu({ post, deleting, onDeleting }: { post: Post; deleting: boolean; onDeleting: (deleting: boolean) => void }) {
   const c = useColors()
   const toast = useToast()
   const router = useRouter()
@@ -268,14 +271,22 @@ function PostMenu({ post }: { post: Post }) {
       icon: 'trash',
       label: 'Delete post',
       danger: true,
-      run: () =>
+      run: () => {
+        onDeleting(true)
         void remove({ id: post.id }).then((result) => {
-          if (result.error) return toast('Could not delete that post')
+          if (result.error) {
+            onDeleting(false)
+            return toast('Could not delete that post')
+          }
+          // The card stays dimmed until the refreshed list drops it.
           toast('Post deleted')
           if (router.canGoBack()) router.back()
-        }),
+        })
+      },
     })
   }
+
+  if (deleting) return <ActivityIndicator size="small" color={c.textMuted} style={styles.menuButton} accessibilityLabel="Deleting post" />
 
   return (
     <>
@@ -311,6 +322,7 @@ function PostMenu({ post }: { post: Post }) {
 
 const styles = StyleSheet.create({
   post: { flexDirection: 'row', gap: 12, paddingTop: 16, paddingBottom: 8, paddingHorizontal: 18, borderBottomWidth: 1 },
+  deleting: { opacity: 0.45, pointerEvents: 'none' },
   main: { flex: 1, minWidth: 0 },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 22 },
   byline: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0 },

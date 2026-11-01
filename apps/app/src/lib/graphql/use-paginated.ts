@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { type AnyVariables, type TypedDocumentNode, useQuery } from 'urql'
+import { type AnyVariables, createRequest, type TypedDocumentNode, useQuery } from 'urql'
 
 interface ConnectionLike<Node> {
   edges: ReadonlyArray<{ node: Node }>
@@ -25,7 +25,11 @@ export function usePaginatedQuery<Data, Variables extends AnyVariables, Node>(
   const after = page.key === key ? page.after : null
   const [more] = useQuery({ query, variables: { ...variables, after } as Variables, pause: options.pause || !after })
 
-  const connection = select(result.data)
+  // While new variables load, urql keeps returning the previous ones' data
+  // (another feed tab, place or search). Show that as loading, not as this list.
+  const current = result.operation?.key === createRequest(query, variables).key
+  const data = current ? result.data : undefined
+  const connection = select(data)
   const pageInfo = connection?.pageInfo
   const loadMore = () => {
     if (pageInfo?.hasNextPage && pageInfo.endCursor && !more.fetching) setPage({ key, after: pageInfo.endCursor })
@@ -36,13 +40,13 @@ export function usePaginatedQuery<Data, Variables extends AnyVariables, Node>(
   }
 
   return {
-    data: result.data,
+    data,
     nodes: connection?.edges.map((edge) => edge.node) ?? [],
     hasMore: Boolean(pageInfo?.hasNextPage),
-    loading: result.fetching && !result.data,
-    refreshing: result.fetching && Boolean(result.data),
+    loading: result.fetching && !data,
+    refreshing: result.fetching && Boolean(data),
     loadingMore: more.fetching,
-    error: result.error,
+    error: current ? result.error : undefined,
     loadMore,
     refresh,
   }

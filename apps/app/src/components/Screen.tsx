@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { documentTitle } from '@/lib/seo'
 import { brand, fonts, sticky, useColors } from '@/theme'
 import { Icon } from './Icon'
+import { useScreenMounted } from './shell/AppShell'
 import { IconButton, Txt } from './ui'
 
 /**
@@ -15,6 +16,7 @@ import { IconButton, Txt } from './ui'
  */
 export function Screen({ title, header, children }: { title: string; header: ReactNode; children: ReactNode }) {
   const c = useColors()
+  useScreenMounted()
   return (
     <View style={[styles.screen, { backgroundColor: c.surface }]}>
       {Platform.OS === 'web' ? (

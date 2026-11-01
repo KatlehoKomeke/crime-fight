@@ -20,16 +20,18 @@ export default function SavedScreen() {
 
   return (
     <Screen title="Saved" header={<PageHeader title="Saved" subtitle="Only you can see these" />}>
-      {status === 'signed-in' ? (
+      {status === 'signed-out' ? (
+        <EmptyState icon="lock" title="Your saved updates live here" body="Sign in to bookmark advisories and updates and find them on any device." action={<Button label="Sign in" onPress={() => router.push('/sign-in')} />} />
+      ) : (
         <PostList
           {...saved}
+          // The session is read on the device, so the server render and first paint don't know it yet.
+          loading={saved.loading || status === 'loading'}
           onEndReached={saved.loadMore}
           onRefresh={saved.refresh}
           header={<View />}
           empty={<EmptyState icon="bookmark" title="Nothing saved yet" body="Tap the bookmark on any update to keep it here — handy for advisories you want to revisit." />}
         />
-      ) : (
-        <EmptyState icon="lock" title="Your saved updates live here" body="Sign in to bookmark advisories and updates and find them on any device." action={<Button label="Sign in" onPress={() => router.push('/sign-in')} />} />
       )}
     </Screen>
   )

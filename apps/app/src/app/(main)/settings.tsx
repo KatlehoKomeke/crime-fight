@@ -37,8 +37,14 @@ function AccountSettings() {
   const router = useRouter()
   const { method, signOut } = useAuth()
   const [{ data, fetching }] = useQuery({ query: SettingsQuery })
+  const [signingOut, setSigningOut] = useState(false)
   const viewer = data?.viewer
   if (!viewer) return fetching ? <LoadingRows /> : null
+
+  const leave = () => {
+    setSigningOut(true)
+    void signOut().then(() => router.replace('/'))
+  }
 
   return (
     <>
@@ -50,7 +56,7 @@ function AccountSettings() {
         <Row label="Signed in with" value={method ? METHOD_LABEL[method] : 'Single sign-on'} />
         <Row label="Handle" value={`@${viewer.handle}`} hint="Your public name in links and mentions. Handles can’t be changed yet." />
         <View style={styles.actions}>
-          <Button label="Sign out" tone="outline" icon="logout" onPress={() => void signOut().then(() => router.replace('/'))} />
+          <Button label="Sign out" tone="outline" icon="logout" loading={signingOut} onPress={leave} />
         </View>
       </Section>
     </>
