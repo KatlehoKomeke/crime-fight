@@ -72,7 +72,13 @@ export function RightRail() {
         </Card>
 
         <View style={styles.footer}>
-          {['Terms', 'Privacy', 'Trust & safety', 'Accessibility'].map((label) => (
+          <Link href="/terms" style={{ fontFamily: fonts.regular, fontSize: 12, lineHeight: 18, color: c.textMuted }}>
+            Terms
+          </Link>
+          <Link href="/privacy" style={{ fontFamily: fonts.regular, fontSize: 12, lineHeight: 18, color: c.textMuted }}>
+            Privacy
+          </Link>
+          {['Trust & safety', 'Accessibility'].map((label) => (
             <Txt key={label} variant="small" color="textMuted" style={{ fontSize: 12 }}>
               {label}
             </Txt>

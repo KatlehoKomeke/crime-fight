@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router'
+import { Link, useRouter } from 'expo-router'
 import Head from 'expo-router/head'
 import { StatusBar } from 'expo-status-bar'
 import { type ReactNode, useState } from 'react'
@@ -96,8 +96,15 @@ export default function SignInScreen() {
                   <SsoButton key={provider} provider={provider} loading={busy === provider} disabled={busy !== null} onPress={() => void run({ provider })} />
                 ))}
                 <Text style={styles.fine}>
-                  We receive only your name and email address, never your password. By continuing, you agree to our Terms of Service and Privacy
-                  Policy.
+                  We receive only your name and email address, never your password. By continuing, you agree to our{' '}
+                  <Link href="/terms" style={styles.fineLink}>
+                    Terms of use
+                  </Link>{' '}
+                  and{' '}
+                  <Link href="/privacy" style={styles.fineLink}>
+                    Privacy policy
+                  </Link>
+                  .
                 </Text>
               </>
             ) : (
@@ -217,6 +224,7 @@ const styles = StyleSheet.create({
   actions: { width: '100%', maxWidth: 380, gap: 12, marginTop: 40 },
   join: { fontFamily: fonts.displaySemibold, fontSize: 22, letterSpacing: -0.5, color: brand.paper, marginBottom: 6 },
   fine: { fontFamily: fonts.regular, fontSize: 12.5, lineHeight: 18, color: muted, marginTop: 6 },
+  fineLink: { color: brand.paper, textDecorationLine: 'underline' },
   devLabel: { fontFamily: fonts.bold, fontSize: 10.5, letterSpacing: 0.9, textTransform: 'uppercase', color: brand.lime, marginBottom: 2 },
   pill: { height: 50, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, borderWidth: 1 },
   pillSolid: { backgroundColor: brand.paper, borderColor: brand.paper },
