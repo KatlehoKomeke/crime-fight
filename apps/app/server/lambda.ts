@@ -86,6 +86,9 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
     cookies: response.headers.getSetCookie(),
   })
   if (!response.body) {
+    // The status and headers go out with the first write; end() alone drops
+    // them and the Function URL answers 200 with an empty body (e.g. redirects).
+    stream.write('')
     stream.end()
     return
   }
