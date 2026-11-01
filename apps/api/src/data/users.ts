@@ -1,6 +1,8 @@
 import { type Database, schema, type User } from '@civic/db'
 import { and, desc, eq, isNotNull, ne, notInArray, sql } from 'drizzle-orm'
 import type { Identity } from '../auth'
+import { apiError } from '../errors'
+import type { SignIns } from '../sign-ins'
 
 const { users, follows } = schema
 
@@ -17,7 +19,13 @@ const sanitizeHandle = (raw: string) =>
  * post-confirmation Lambda. The name seeds the profile once and stays
  * editable; the email follows the identity provider.
  */
-export async function resolveViewer(db: Database, identity: Identity): Promise<User | null> {
+/**
+ * The user for a verified identity, created on first sign-in. With `signIns`, a
+ * new user is only created while the sign-in still exists: a deleted account's
+ * ID tokens stay valid for up to an hour, and another signed-in tab must not
+ * bring the account back.
+ */
+export async function resolveViewer(db: Database, identity: Identity, signIns?: SignIns): Promise<User | null> {
   if (identity.kind === 'dev') {
     const [row] = await db.select().from(users).where(eq(users.handle, identity.handle.toLowerCase()))
     return row ?? null
@@ -29,6 +37,9 @@ export async function resolveViewer(db: Database, identity: Identity): Promise<U
     if (existing.email === email) return existing
     const [updated] = await db.update(users).set({ email }).where(eq(users.id, existing.id)).returning()
     return updated ?? existing
+  }
+  if (signIns && !(await signIns.exists(identity))) {
+    throw apiError('UNAUTHENTICATED', 'This account has been deleted.', { http: { status: 401 } })
   }
 
   const base = sanitizeHandle(identity.preferredUsername ?? identity.email?.split('@')[0] ?? 'neighbour')

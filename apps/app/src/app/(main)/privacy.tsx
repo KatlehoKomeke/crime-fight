@@ -51,7 +51,7 @@ const SECTIONS: LegalSection[] = [
       [
         'Everyone: your handle, display name, bio, posts, replies, and follower and following counts. This includes people who aren’t signed in, and search engines.',
         'Only you: your email address and your saved posts.',
-        'The people in a conversation: its messages. Only members who follow each other can message, and both keep the history.',
+        'The people in a conversation: its messages. Only members who follow each other can message. Both keep the history, unless one of them deletes their account, which deletes the conversation for both.',
       ],
       'Messages are encrypted in transit and on our servers, but they are not end-to-end encrypted. We access them only when we need to run the service, investigate abuse or comply with the law.',
     ],
@@ -83,7 +83,7 @@ const SECTIONS: LegalSection[] = [
         'Server logs: 30 days.',
         'Backups: up to 14 days.',
       ],
-      'When you delete your account, we delete your profile, posts, likes, reposts, saves, follows and the messages you sent within 30 days, and they leave our backups within a further 14 days. We keep information for longer only if the law requires it or an investigation is under way.',
+      'When you delete your account in Settings, we immediately delete your profile, your posts and the replies under them, your likes, reposts, saves and follows, your conversations, and your sign-in record with our login provider. Copies leave our backups within 14 days. We keep information for longer only if the law requires it.',
     ],
   },
   {
@@ -96,7 +96,7 @@ const SECTIONS: LegalSection[] = [
         'delete it, or your whole account;',
         'stop processing it, if you have grounds to object.',
       ],
-      `You can edit your profile in Settings at any time. For anything else, email ${contact} from the address you sign in with. We’ll respond within 30 days. If you’re unhappy with how we handle your information, you can complain to the [Information Regulator](https://inforegulator.org.za).`,
+      `You can edit your profile, or delete your account, in Settings at any time. For anything else, email ${contact} from the address you sign in with. We’ll respond within 30 days. If you’re unhappy with how we handle your information, you can complain to the [Information Regulator](https://inforegulator.org.za).`,
     ],
   },
   {

@@ -2,7 +2,15 @@ import { CognitoJwtVerifier } from 'aws-jwt-verify'
 import type { ApiEnv } from './env'
 
 export type Identity =
-  | { kind: 'cognito'; sub: string; email?: string; name?: string; preferredUsername?: string }
+  | {
+      kind: 'cognito'
+      sub: string
+      email?: string
+      name?: string
+      preferredUsername?: string
+      /** `cognito:username`, which Cognito's admin APIs take. */
+      username?: string
+    }
   | { kind: 'dev'; handle: string }
 
 /** `null` = anonymous request, `'invalid'` = a token was sent but failed verification. */
@@ -38,6 +46,7 @@ export function createAuthenticator(env: ApiEnv): Authenticator {
         email: typeof claims.email === 'string' ? claims.email : undefined,
         name: typeof claims.name === 'string' ? claims.name : undefined,
         preferredUsername: typeof claims.preferred_username === 'string' ? claims.preferred_username : undefined,
+        username: typeof claims['cognito:username'] === 'string' ? claims['cognito:username'] : undefined,
       }
     } catch {
       // Surfaced as a 401 so clients refresh their session instead of silently browsing logged out.

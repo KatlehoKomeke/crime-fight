@@ -1,3 +1,4 @@
+import { graphql } from '@civic/graphql'
 import { useRouter } from 'expo-router'
 import { type ComponentProps, type ReactNode, useState } from 'react'
 import { Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native'
@@ -18,6 +19,12 @@ export function generateMetadata() {
 const NAME_MAX = 50
 const BIO_MAX = 160
 const METHOD_LABEL = { google: 'Google', apple: 'Apple', dev: 'Development account' } as const
+
+const DeleteAccountMutation = graphql(`
+  mutation DeleteAccount($handle: String!) {
+    deleteAccount(handle: $handle)
+  }
+`)
 
 export default function SettingsScreen() {
   const { status } = useAuth()
@@ -59,7 +66,73 @@ function AccountSettings() {
           <Button label="Sign out" tone="outline" icon="logout" loading={signingOut} onPress={leave} />
         </View>
       </Section>
+      <Section title="Delete account">
+        <DeleteAccount handle={viewer.handle} />
+      </Section>
     </>
+  )
+}
+
+function DeleteAccount({ handle }: { handle: string }) {
+  const router = useRouter()
+  const toast = useToast()
+  const { signOut } = useAuth()
+  const [, deleteAccount] = useMutation(DeleteAccountMutation)
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const confirmed = typed.trim().replace(/^@/, '').toLowerCase() === handle
+
+  const remove = async () => {
+    setDeleting(true)
+    const result = await deleteAccount({ handle: typed })
+    if (!result.data?.deleteAccount) {
+      setDeleting(false)
+      toast(result.error?.graphQLErrors[0]?.message ?? 'Couldn’t delete your account. Please try again.')
+      return
+    }
+    toast('Your account has been deleted')
+    await signOut()
+    router.replace('/')
+  }
+
+  if (!open) {
+    return (
+      <View style={styles.form}>
+        <Txt variant="small" color="textMuted">
+          Permanently delete your account and everything you’ve shared on CIVIC/ONE.
+        </Txt>
+        <View style={styles.formActions}>
+          <Button label="Delete account" tone="outline" icon="trash" onPress={() => setOpen(true)} />
+        </View>
+      </View>
+    )
+  }
+
+  return (
+    <View style={styles.form}>
+      <Txt variant="bodyStrong">This can’t be undone.</Txt>
+      <Txt variant="small" color="textMuted">
+        We’ll delete your profile, your posts and the replies under them, your likes, reposts, saved posts and follows, and your conversations for both
+        people in them. Your sign-in is removed too, so signing in again starts a new account.
+      </Txt>
+      <View style={{ gap: 6 }}>
+        <Txt variant="label">Type @{handle} to confirm</Txt>
+        <Input value={typed} onChangeText={setTyped} placeholder={`@${handle}`} autoCapitalize="none" autoCorrect={false} accessibilityLabel={`Type @${handle} to confirm`} />
+      </View>
+      <View style={styles.formActions}>
+        <Button label="Delete my account" tone="danger" icon="trash" loading={deleting} disabled={!confirmed} onPress={() => void remove()} />
+        <Button
+          label="Cancel"
+          tone="ghost"
+          disabled={deleting}
+          onPress={() => {
+            setOpen(false)
+            setTyped('')
+          }}
+        />
+      </View>
+    </View>
   )
 }
 

@@ -1,5 +1,6 @@
 import { schema } from '@civic/db'
 import type { Context } from '../context'
+import { deleteAccount } from '../data/account'
 import { createPost, deletePost, setEdge, setFollow, updateProfile } from '../data/mutations'
 import { apiError } from '../errors'
 import { builder } from './builder'
@@ -48,6 +49,20 @@ builder.mutationType({
       type: 'ID',
       args: { id: t.arg.id({ required: true }) },
       resolve: async (_root, { id }, ctx) => deletePost(ctx.db, await ctx.requireViewer(), String(id)),
+    }),
+
+    deleteAccount: t.boolean({
+      description:
+        'Permanently deletes your account: profile, posts and the replies under them, likes, reposts, saves, follows and conversations. `handle` must be your own handle, to confirm.',
+      args: { handle: t.arg.string({ required: true }) },
+      resolve: async (_root, { handle }, ctx) => {
+        const viewer = await ctx.requireViewer()
+        if (handle.trim().replace(/^@/, '').toLowerCase() !== viewer.handle) throw apiError('BAD_USER_INPUT', 'Type your handle to confirm.')
+        await deleteAccount(ctx.db, viewer)
+        // Logged, not thrown: the account itself is already gone.
+        if (ctx.identity) await ctx.signIns.remove(ctx.identity).catch((error: unknown) => console.error('[deleteAccount] sign-in not removed', error))
+        return true
+      },
     }),
 
     followUser: t.field({

@@ -3,12 +3,14 @@ import { createDb, dbConfigFromEnv } from '@civic/db'
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context as LambdaContext } from 'aws-lambda'
 import { readEnv } from '../env'
 import { appSyncPublisher } from '../realtime/publisher'
+import { cognitoSignIns } from '../sign-ins'
 import { createApi } from '../yoga'
 
 // Created once per container and reused across invocations.
 const env = readEnv()
 const realtime = env.realtimeHost ? appSyncPublisher({ host: env.realtimeHost, region: process.env.AWS_REGION ?? 'af-south-1' }) : undefined
-const api = createApi({ db: createDb(dbConfigFromEnv()).db, env, realtime })
+const signIns = env.authMode === 'cognito' && env.cognitoUserPoolId ? cognitoSignIns(env.cognitoUserPoolId) : undefined
+const api = createApi({ db: createDb(dbConfigFromEnv()).db, env, realtime, signIns })
 
 /**
  * CloudFront passes the API straight through without caching or compressing it,

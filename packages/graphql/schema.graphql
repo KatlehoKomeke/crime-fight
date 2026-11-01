@@ -116,6 +116,11 @@ type MessageEdge {
 
 type Mutation {
   createPost(input: CreatePostInput!): Post!
+
+  """
+  Permanently deletes your account: profile, posts and the replies under them, likes, reposts, saves, follows and conversations. `handle` must be your own handle, to confirm.
+  """
+  deleteAccount(handle: String!): Boolean!
   deletePost(id: ID!): ID!
   followUser(id: ID!): User!
   likePost(id: ID!): Post!

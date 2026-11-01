@@ -14,6 +14,7 @@ import type { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-
  * Learn more about it here: https://the-guild.dev/graphql/codegen/plugins/presets/preset-client#reducing-bundle-size
  */
 type Documents = {
+    "\n  mutation DeleteAccount($handle: String!) {\n    deleteAccount(handle: $handle)\n  }\n": typeof types.DeleteAccountDocument,
     "\n  fragment PostCardFields on Post {\n    id\n    body\n    kind\n    severity\n    area\n    category\n    createdAt\n    replyCount\n    likeCount\n    repostCount\n    viewerHasLiked\n    viewerHasSaved\n    viewerHasReposted\n    viewerCanDelete\n    trustBadge\n    location {\n      lat\n      lng\n    }\n    author {\n      id\n      handle\n      displayName\n      initials\n      avatarUrl\n      verified\n      role\n    }\n    media {\n      id\n      url\n      alt\n      caption\n      width\n      height\n    }\n    replyTo {\n      id\n      author {\n        id\n        handle\n      }\n    }\n  }\n": typeof types.PostCardFieldsFragmentDoc,
     "\n  fragment UserRowFields on User {\n    id\n    handle\n    displayName\n    initials\n    avatarUrl\n    verified\n    role\n    viewerIsFollowing\n    isViewer\n  }\n": typeof types.UserRowFieldsFragmentDoc,
     "\n  query Feed($kind: FeedKind!, $near: GeoInput, $radiusKm: Float, $first: Int!, $after: String) {\n    feed(kind: $kind, near: $near, radiusKm: $radiusKm, first: $first, after: $after) {\n      edges {\n        cursor\n        node {\n          ...PostCardFields\n        }\n      }\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n    }\n  }\n": typeof types.FeedDocument,
@@ -51,6 +52,7 @@ type Documents = {
     "\n  mutation MarkConversationRead($id: ID!) {\n    markConversationRead(id: $id) {\n      ...InboxEventFields\n    }\n  }\n": typeof types.MarkConversationReadDocument,
 };
 const documents: Documents = {
+    "\n  mutation DeleteAccount($handle: String!) {\n    deleteAccount(handle: $handle)\n  }\n": types.DeleteAccountDocument,
     "\n  fragment PostCardFields on Post {\n    id\n    body\n    kind\n    severity\n    area\n    category\n    createdAt\n    replyCount\n    likeCount\n    repostCount\n    viewerHasLiked\n    viewerHasSaved\n    viewerHasReposted\n    viewerCanDelete\n    trustBadge\n    location {\n      lat\n      lng\n    }\n    author {\n      id\n      handle\n      displayName\n      initials\n      avatarUrl\n      verified\n      role\n    }\n    media {\n      id\n      url\n      alt\n      caption\n      width\n      height\n    }\n    replyTo {\n      id\n      author {\n        id\n        handle\n      }\n    }\n  }\n": types.PostCardFieldsFragmentDoc,
     "\n  fragment UserRowFields on User {\n    id\n    handle\n    displayName\n    initials\n    avatarUrl\n    verified\n    role\n    viewerIsFollowing\n    isViewer\n  }\n": types.UserRowFieldsFragmentDoc,
     "\n  query Feed($kind: FeedKind!, $near: GeoInput, $radiusKm: Float, $first: Int!, $after: String) {\n    feed(kind: $kind, near: $near, radiusKm: $radiusKm, first: $first, after: $after) {\n      edges {\n        cursor\n        node {\n          ...PostCardFields\n        }\n      }\n      pageInfo {\n        hasNextPage\n        endCursor\n      }\n    }\n  }\n": types.FeedDocument,
@@ -102,6 +104,10 @@ const documents: Documents = {
  */
 export function graphql(source: string): unknown;
 
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation DeleteAccount($handle: String!) {\n    deleteAccount(handle: $handle)\n  }\n"): (typeof documents)["\n  mutation DeleteAccount($handle: String!) {\n    deleteAccount(handle: $handle)\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

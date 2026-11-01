@@ -1,27 +1,8 @@
-import { createHash, createHmac } from 'node:crypto'
-import { SignatureV4 } from '@smithy/signature-v4'
+import { lambdaSigner } from '../aws'
 
 /** Sends events to everyone subscribed to a channel. */
 export interface Publisher {
   publish(channel: string, events: unknown[]): Promise<void>
-}
-
-type SourceData = string | ArrayBuffer | ArrayBufferView
-const bytes = (data: SourceData) =>
-  typeof data === 'string' ? data : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data)
-
-/** SHA-256 for SigV4 on node:crypto (what @smithy/hash-node does, without the dependency). */
-class Sha256 {
-  private readonly hash
-  constructor(secret?: SourceData) {
-    this.hash = secret ? createHmac('sha256', bytes(secret)) : createHash('sha256')
-  }
-  update(data: SourceData) {
-    this.hash.update(bytes(data))
-  }
-  digest() {
-    return Promise.resolve(new Uint8Array(this.hash.digest()))
-  }
 }
 
 /**
@@ -30,18 +11,7 @@ class Sha256 {
  * https://docs.aws.amazon.com/appsync/latest/eventapi/publish-http.html
  */
 export function appSyncPublisher({ host, region }: { host: string; region: string }): Publisher {
-  const signer = new SignatureV4({
-    service: 'appsync',
-    region,
-    sha256: Sha256,
-    // Lambda puts the execution role's temporary credentials in the environment.
-    credentials: () =>
-      Promise.resolve({
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-        sessionToken: process.env.AWS_SESSION_TOKEN,
-      }),
-  })
+  const signer = lambdaSigner('appsync', region)
 
   return {
     async publish(channel, events) {

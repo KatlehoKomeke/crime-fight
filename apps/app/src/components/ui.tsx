@@ -49,7 +49,7 @@ export function Touchable({
   )
 }
 
-type ButtonTone = 'primary' | 'accent' | 'outline' | 'ghost'
+type ButtonTone = 'primary' | 'accent' | 'outline' | 'ghost' | 'danger'
 
 export function Button({
   label,
@@ -78,6 +78,8 @@ export function Button({
     accent: { bg: c.accent, fg: c.onAccent, border: c.accent, hover: c.accent },
     outline: { bg: 'transparent', fg: c.text, border: c.line, hover: c.surfaceAlt },
     ghost: { bg: 'transparent', fg: c.accentText, border: 'transparent', hover: c.surfaceAlt },
+    // Tinted rather than solid: white on the dark theme's lighter red would be hard to read.
+    danger: { bg: c.dangerTint, fg: c.danger, border: c.danger, hover: c.dangerTint },
   }
   const t = tones[tone]
   const pad = { sm: { h: 32, px: 14, fs: 12 }, md: { h: 40, px: 18, fs: 13 }, lg: { h: 50, px: 22, fs: 15 } }[size]

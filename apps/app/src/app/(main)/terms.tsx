@@ -51,7 +51,9 @@ const SECTIONS: LegalSection[] = [
   },
   {
     heading: 'Messages',
-    blocks: ['Only members who follow each other can message. Don’t use messages to harass anyone. Unfollowing someone stops them from messaging you.'],
+    blocks: [
+      'Only members who follow each other can message. Don’t use messages to harass anyone. Unfollowing someone stops them from messaging you. If either of you deletes your account, the conversation is deleted for both of you.',
+    ],
   },
   {
     heading: 'Your content',
@@ -83,7 +85,9 @@ const SECTIONS: LegalSection[] = [
   },
   {
     heading: 'Ending your account',
-    blocks: [`You can stop using CIVIC/ONE at any time. To delete your account, email ${contact} from the address you sign in with.`],
+    blocks: [
+      'You can stop using CIVIC/ONE at any time, and delete your account in Settings. Deleting it removes your posts, the replies under them and your conversations straight away, and can’t be undone.',
+    ],
   },
   {
     heading: 'Changes to these terms',

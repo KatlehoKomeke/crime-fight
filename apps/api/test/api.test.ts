@@ -8,11 +8,13 @@ import { seed } from '@civic/db/seed'
 import { eq } from 'drizzle-orm'
 import pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAuthenticator } from '../src/auth'
+import { createAuthenticator, type Identity } from '../src/auth'
+import { deleteAccount } from '../src/data/account'
 import { resolveViewer } from '../src/data/users'
 import { readEnv } from '../src/env'
 import { attachLocalRealtime } from '../src/realtime/local-server'
 import { memoryHub } from '../src/realtime/publisher'
+import type { SignIns } from '../src/sign-ins'
 import { createApi } from '../src/yoga'
 
 const TEST_URL = process.env.TEST_DATABASE_URL ?? 'postgres://civic:civic@localhost:54329/civic_test'
@@ -461,5 +463,86 @@ describe('messaging', () => {
       wss.close()
       server.close()
     }
+  })
+})
+
+describe('account deletion', () => {
+  const DELETE = `mutation($handle: String!) { deleteAccount(handle: $handle) }`
+  const COUNTS = `query($id: ID!) { post(id: $id) { likeCount repostCount replyCount } }`
+  const idOf = async (who: string) => (await gql(`query($handle: String!) { user(handle: $handle) { id } }`, { handle: who })).data.user?.id as string | undefined
+  const post = async (as: string, body: string, replyToId?: string) =>
+    (await gql(`mutation($input: CreatePostInput!) { createPost(input: $input) { id } }`, { input: { body, replyToId } }, as)).data.createPost.id as string
+  const postExists = async (id: string) => (await gql(`query($id: ID!) { post(id: $id) { id } }`, { id })).data.post !== null
+  const act = (mutation: string, id: string, as: string) => gql(`mutation($id: ID!) { ${mutation}(id: $id) { id } }`, { id }, as)
+
+  it('deletes everything the account owns and gives back its counts on other people’s posts', async () => {
+    const theirs = await post('jordan_o', 'Streetlights out on Main Road again tonight')
+    const before = (await gql(COUNTS, { id: theirs })).data.post
+    const mine = await post('alexm', 'Brown and white dog found near the park, very friendly')
+    const answer = await post('jordan_o', 'Looks like the one missing from Oak Street', mine)
+    await post('alexm', 'Reported it to the municipality as well', theirs)
+    await act('likePost', theirs, 'alexm')
+    await act('repostPost', theirs, 'alexm')
+
+    const [alex, jordan] = [(await idOf('alexm'))!, (await idOf('jordan_o'))!]
+    await act('followUser', jordan, 'alexm')
+    await act('followUser', alex, 'jordan_o')
+    const conversation = (await gql(`mutation($userId: ID!) { startConversation(userId: $userId) { id } }`, { userId: jordan }, 'alexm')).data.startConversation.id
+    const send = (body: string, as: string) => gql(`mutation($id: ID!, $body: String!) { sendMessage(conversationId: $id, body: $body) { conversation { id } } }`, { id: conversation, body }, as)
+    await send('Is that your dog?', 'jordan_o')
+    await send('It is, thank you!', 'alexm')
+
+    expect(await gql(DELETE, { handle: ' @AlexM ' }, 'alexm')).toMatchObject({ data: { deleteAccount: true } })
+
+    expect(await idOf('alexm')).toBeUndefined()
+    expect((await gql(COUNTS, { id: theirs })).data.post).toEqual(before)
+    // The account's posts go, and the replies under them with them.
+    expect([await postExists(mine), await postExists(answer), await postExists(theirs)]).toEqual([false, false, true])
+    const inbox = (await gql(`{ conversations(first: 20) { edges { node { id } } } }`, {}, 'jordan_o')).data.conversations.edges
+    expect(inbox.map((edge: { node: { id: string } }) => edge.node.id)).not.toContain(conversation)
+
+    const { likes, saves, reposts, follows, messages, conversationMembers } = schema
+    const left = await Promise.all([
+      handle.db.select().from(likes).where(eq(likes.userId, alex)),
+      handle.db.select().from(saves).where(eq(saves.userId, alex)),
+      handle.db.select().from(reposts).where(eq(reposts.userId, alex)),
+      handle.db.select().from(follows).where(eq(follows.followerId, alex)),
+      handle.db.select().from(follows).where(eq(follows.followeeId, alex)),
+      handle.db.select().from(messages).where(eq(messages.senderId, alex)),
+      handle.db.select().from(conversationMembers).where(eq(conversationMembers.userId, alex)),
+    ])
+    expect(left.flat()).toEqual([])
+  })
+
+  it('needs a signed-in user and their own handle', async () => {
+    expect((await gql(DELETE, { handle: 'alexm' })).errors?.[0]?.extensions.code).toBe('UNAUTHENTICATED')
+    expect((await gql(DELETE, { handle: 'jordan_o' }, 'alexm')).errors?.[0]?.extensions.code).toBe('BAD_USER_INPUT')
+    expect(await idOf('alexm')).toBeDefined()
+  })
+
+  it('removes the sign-in, so a still-valid token can’t bring the account back', async () => {
+    const removed: Identity[] = []
+    const signIns: SignIns = {
+      exists: (identity) => Promise.resolve(!removed.some((r) => r.kind === 'cognito' && identity.kind === 'cognito' && r.sub === identity.sub)),
+      remove: (identity) => {
+        removed.push(identity)
+        return Promise.resolve()
+      },
+    }
+    const withSignIns = createApi({ db: handle.db, env: readEnv({ STAGE: 'test', AUTH_MODE: 'dev' }), realtime: hub, signIns })
+    await withSignIns.fetch('http://test/graphql', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-dev-user': 'alexm' },
+      body: JSON.stringify({ query: DELETE, variables: { handle: 'alexm' } }),
+    })
+    expect(removed).toEqual([{ kind: 'dev', handle: 'alexm' }])
+
+    // A deleted Cognito user's ID token keeps verifying until it expires (up to an hour).
+    const google = { kind: 'cognito', sub: 'c0ffee00-0000-4000-8000-000000000003', username: 'google_1003', email: 'sam@example.org', name: 'Sam' } as const
+    const sam = await resolveViewer(handle.db, google, signIns)
+    await deleteAccount(handle.db, sam!)
+    await signIns.remove(google)
+    await expect(resolveViewer(handle.db, google, signIns)).rejects.toMatchObject({ extensions: { code: 'UNAUTHENTICATED' } })
+    expect(await handle.db.select().from(schema.users).where(eq(schema.users.authSub, google.sub))).toEqual([])
   })
 })

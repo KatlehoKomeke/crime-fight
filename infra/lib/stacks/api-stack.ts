@@ -113,6 +113,8 @@ export class ApiStack extends Stack {
     })
     cluster.grantDataApiAccess(graphql)
     inbox.grantPublish(graphql)
+    // Deleting an account removes its Cognito user; a deleted user's tokens can't provision a new one.
+    userPool.grant(graphql, 'cognito-idp:AdminGetUser', 'cognito-idp:AdminDeleteUser')
 
     const migrate = new nodejs.NodejsFunction(this, 'Migrate', {
       ...common,
