@@ -16,6 +16,7 @@ import { fontAssets } from '@/theme'
 if (Platform.OS !== 'web') void SplashScreen.preventAutoHideAsync()
 
 export default function RootLayout() {
+  // Empty on web, which declares its fonts in the document head (+html.tsx).
   const [fontsLoaded] = useFonts(fontAssets)
 
   useEffect(() => {

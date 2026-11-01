@@ -1,31 +1,13 @@
-import {
-  DMSans_400Regular,
-  DMSans_500Medium,
-  DMSans_600SemiBold,
-  DMSans_700Bold,
-} from '@expo-google-fonts/dm-sans'
-import { SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk'
-import { FontDisplay, type FontResource } from 'expo-font'
 import { Platform } from 'react-native'
+import type { fontAssets as nativeFontAssets } from './font-assets'
 
-// On web, show text in the fallback stack at once and swap the font in when it
-// arrives. Without it browsers hide text for up to 3s on slow connections.
-const swap = (uri: FontResource['uri']): FontResource => ({ uri, display: FontDisplay.SWAP })
+export { fontAssets } from './font-assets'
 
-export const fontAssets = {
-  DMSans_400Regular: swap(DMSans_400Regular),
-  DMSans_500Medium: swap(DMSans_500Medium),
-  DMSans_600SemiBold: swap(DMSans_600SemiBold),
-  DMSans_700Bold: swap(DMSans_700Bold),
-  SpaceGrotesk_600SemiBold: swap(SpaceGrotesk_600SemiBold),
-  SpaceGrotesk_700Bold: swap(SpaceGrotesk_700Bold),
-}
-
-type FontKey = keyof typeof fontAssets
+export type FontFamily = keyof typeof nativeFontAssets
 
 // Native needs one registered family per weight; web gets a fallback stack so
 // text renders immediately while the font streams in.
-const family = (key: FontKey, fallback: string) => (Platform.OS === 'web' ? `${key}, ${fallback}` : key)
+const family = (key: FontFamily, fallback: string) => (Platform.OS === 'web' ? `${key}, ${fallback}` : key)
 const sans = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
 
 export const fonts = {

@@ -19,7 +19,8 @@ CDK app: `infra/`. Stacks per stage: **Data** (isolated VPC, Aurora), **Auth** (
 ## Key choices
 
 - **Same-origin everything.** No CORS for the browser, one TLS connection, simpler CSP later.
-- **SSR on Lambda with response streaming** behind CloudFront using **Origin Access Control** (the Function URL is IAM-only; only CloudFront can call it). Anonymous HTML is edge-cached for 10 s with `stale-while-revalidate=60`, which absorbs traffic spikes during incidents.
+- **SSR on Lambda with response streaming** behind CloudFront using **Origin Access Control** (the Function URL is IAM-only; only CloudFront can call it).
+- **Pages and the API aren't cached at the edge** (November 2026). CloudFront has no regional edge cache in Africa, so a cacheable request that missed at the Cape Town edge went to one in Europe and back to af-south-1. Measured on prod, that added about 550ms to every signed-in read, to every page not already cached and to every in-app navigation. Cached copies were faster (about 0.1s), but only for the few pages a warmer kept fresh. With caching disabled, requests go straight from the edge to the origin: about 0.1s to the API and 0.2–0.3s for a rendered page. The Lambdas compress their own responses, because CloudFront doesn't compress uncached or streamed responses. To absorb spikes, Lambda now scales instead (quota 1000). The SSR Lambda also shares identical anonymous API calls for 5s, so a burst of page views doesn't become a burst of database queries. A prod warmer requests the main pages once a minute to avoid cold starts.
 - **App Runner was ruled out:** AWS closed it to new customers on 30 April 2026. ECS Express Mode is the long-running alternative if Lambda ever stops fitting.
 - **Migrations run as a CDK Trigger** before the new API version is deployed. A failed migration fails the deploy, and the old API keeps serving.
 - **Build once, promote.** CI builds the web bundle once; the same artefact deploys to QA and then prod. Runtime config (site URL, Cognito client) is read at request time, so nothing environment-specific is baked into the bundle.
@@ -40,7 +41,7 @@ pull request ─► CI only
 | | QA | Prod |
 | --- | --- | --- |
 | Aurora | 0–2 ACU, auto-pause after 15 min | 0.5–16 ACU + 1 reader, deletion protection, 14-day backups |
-| GraphQL | Ad-hoc queries allowed, GraphiQL on | **Persisted operations only**, GraphiQL off, optional reserved concurrency (`API_RESERVED_CONCURRENCY`, once the account's Lambda quota allows it) |
+| GraphQL | Ad-hoc queries allowed, GraphiQL on | **Persisted operations only**, GraphiQL off, optional reserved concurrency (`API_RESERVED_CONCURRENCY`) |
 | Cognito | Extra `localhost` callback for testing | Deletion protection, retained on stack delete |
 
 ## Not done yet (recommended next)

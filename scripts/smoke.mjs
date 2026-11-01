@@ -28,6 +28,8 @@ await retry('home page is server-rendered', async () => {
   if (res.status !== 200) throw new Error(`status ${res.status}`)
   if (!html.includes('<title>CIVIC/ONE')) throw new Error('missing SSR <title>')
   if (!html.includes('__CIVIC_CONFIG__')) throw new Error('missing runtime config')
+  // CloudFront passes pages through untouched, so the SSR Lambda must compress them.
+  if (!/^(br|gzip)$/.test(res.headers.get('content-encoding') ?? '')) throw new Error('page is not compressed')
 })
 
 await retry('static assets are served from S3', async () => {
@@ -43,6 +45,16 @@ await retry('hashed JS bundles are served', async () => {
     const res = await fetch(`${site}${src}`)
     const type = res.headers.get('content-type') ?? ''
     if (res.status !== 200 || !type.includes('javascript')) throw new Error(`${src}: status ${res.status} (${type})`)
+  }
+})
+
+// The head declares the web fonts. A missing file is easy to miss: it just looks like the fallback font.
+const fonts = [...new Set([...html.matchAll(/url\("(\/assets\/[^"]+\.woff2)"\)/g)].map((m) => m[1]))]
+if (fonts.length === 0) throw new Error('home page declares no WOFF2 fonts')
+await retry('web fonts are served', async () => {
+  for (const src of fonts) {
+    const res = await fetch(`${site}${src}`)
+    if (res.status !== 200) throw new Error(`${src}: status ${res.status}`)
   }
 })
 

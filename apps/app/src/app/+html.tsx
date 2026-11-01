@@ -1,10 +1,20 @@
 import { useServerDocumentContext } from 'expo-router/html'
-import type { PropsWithChildren } from 'react'
+import { isValidElement, type PropsWithChildren, type ReactNode } from 'react'
 import { serverConfig } from '@/lib/config'
 import { globalCss } from '@/theme/css'
+import { webFontCss, webFontPreloads } from '@/theme/web-fonts'
 
 /** `</script>`-safe JSON for inline scripts. */
 const inlineJson = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c')
+
+/**
+ * Expo preloads every script chunk, which fetches ~1MB of JavaScript at high
+ * priority. On a phone that delays first paint while it competes with the HTML and
+ * fonts. The page is fully server-rendered, so the deferred <script> tags
+ * can start at their normal priority instead.
+ */
+const isScriptPreload = (node: ReactNode) =>
+  isValidElement<{ rel?: string; as?: string }>(node) && node.type === 'link' && node.props.rel === 'preload' && node.props.as === 'script'
 
 /**
  * The HTML document for every server-rendered page (web only). Runs on the
@@ -23,9 +33,13 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0c0a" />
         <meta name="color-scheme" content="light dark" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        {webFontPreloads.map((href) => (
+          <link key={href} rel="preload" href={href} as="font" type="font/woff2" crossOrigin="" />
+        ))}
+        <style id="civic-fonts" dangerouslySetInnerHTML={{ __html: webFontCss }} />
         <style id="civic-global" dangerouslySetInnerHTML={{ __html: globalCss }} />
         <script dangerouslySetInnerHTML={{ __html: `window.__CIVIC_CONFIG__=${inlineJson(serverConfig())}` }} />
-        {headNodes}
+        {(Array.isArray(headNodes) ? headNodes : [headNodes]).filter((node) => !isScriptPreload(node))}
       </head>
       <body {...bodyAttributes}>
         {children}

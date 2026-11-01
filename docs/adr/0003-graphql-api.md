@@ -34,5 +34,4 @@
 ## Follow-ups
 
 - Real-time alerts. Messaging now delivers subscriptions over AppSync Events ([ADR 0005](0005-direct-messages.md)); alerts can reuse it.
-- Edge caching of anonymous persisted GET queries (needs auth-aware cache keys).
 - Image uploads (S3 presigned POST + moderation) and a moderation queue for reports.

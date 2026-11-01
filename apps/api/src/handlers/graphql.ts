@@ -1,3 +1,4 @@
+import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { createDb, dbConfigFromEnv } from '@civic/db'
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context as LambdaContext } from 'aws-lambda'
 import { readEnv } from '../env'
@@ -10,20 +11,16 @@ const realtime = env.realtimeHost ? appSyncPublisher({ host: env.realtimeHost, r
 const api = createApi({ db: createDb(dbConfigFromEnv()).db, env, realtime })
 
 /**
- * Signed-out reads (persisted queries arrive as GET) return the same data to
- * everyone, so CloudFront may share them for about a minute: 30s fresh plus
- * 30s served stale while it refreshes. Anything signed in, failed or
- * partially failed is never cached.
+ * CloudFront passes the API straight through without caching or compressing it,
+ * so larger responses are compressed here. API Gateway returns base64 bodies as binary.
  */
-const EDGE_CACHE = 'public, max-age=0, s-maxage=30, stale-while-revalidate=30'
-
-function cacheControl(method: string, headers: Headers, status: number, body: string): string {
-  if (method !== 'GET' || headers.has('authorization') || status !== 200) return 'no-store'
-  try {
-    return (JSON.parse(body) as { errors?: unknown[] }).errors?.length ? 'no-store' : EDGE_CACHE
-  } catch {
-    return 'no-store'
+function encode(body: string, acceptEncoding = ''): { body: string; encoding?: 'br' | 'gzip' } {
+  if (Buffer.byteLength(body) < 1024) return { body }
+  if (/\bbr\b/.test(acceptEncoding)) {
+    return { body: brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).toString('base64'), encoding: 'br' }
   }
+  if (/\bgzip\b/.test(acceptEncoding)) return { body: gzipSync(body).toString('base64'), encoding: 'gzip' }
+  return { body }
 }
 
 /** API Gateway HTTP API (payload v2) → Fetch API → Yoga. */
@@ -38,10 +35,18 @@ export async function handler(event: APIGatewayProxyEventV2, context: LambdaCont
 
   const response = await api.fetch(`https://${event.requestContext.domainName}${event.rawPath}${query}`, { method, headers, body }, { event, context })
 
-  const text = await response.text()
+  const encoded = encode(await response.text(), headers.get('accept-encoding') ?? undefined)
+  const responseHeaders = Object.fromEntries(response.headers)
+  delete responseHeaders['content-length']
   return {
     statusCode: response.status,
-    headers: { ...Object.fromEntries(response.headers), 'cache-control': cacheControl(method, headers, response.status, text) },
-    body: text,
+    headers: {
+      ...responseHeaders,
+      'cache-control': 'no-store',
+      vary: 'accept-encoding',
+      ...(encoded.encoding ? { 'content-encoding': encoded.encoding } : {}),
+    },
+    body: encoded.body,
+    isBase64Encoded: encoded.encoding !== undefined,
   }
 }

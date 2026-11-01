@@ -10,6 +10,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { constants, createBrotliCompress, createGzip } from 'node:zlib'
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm'
 import type { LambdaFunctionURLEvent } from 'aws-lambda'
 import { createRequestHandler } from 'expo-server/adapter/abstract'
@@ -52,22 +53,43 @@ function toRequest(event: LambdaFunctionURLEvent): Request {
   return new Request(url, { method, headers, body })
 }
 
+const COMPRESSIBLE = /^(text\/|application\/(json|javascript|xml)|image\/svg\+xml)/
+
+/**
+ * CloudFront passes pages straight through, so it never compresses them (it also
+ * can't compress a streamed body). The function does it instead. Each chunk is
+ * flushed so streamed HTML still reaches the browser as React renders it. Brotli
+ * quality 5 is fast enough to run per request and still beats gzip on size.
+ */
+function compressor(acceptEncoding = '') {
+  if (/\bbr\b/.test(acceptEncoding)) {
+    return { encoding: 'br', stream: createBrotliCompress({ flush: constants.BROTLI_OPERATION_FLUSH, params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }) }
+  }
+  if (/\bgzip\b/.test(acceptEncoding)) return { encoding: 'gzip', stream: createGzip({ flush: constants.Z_SYNC_FLUSH }) }
+  return undefined
+}
+
 export const handler = awslambda.streamifyResponse(async (event, responseStream) => {
   await ready
   const response = await scope(handle, toRequest(event))
   const headers = Object.fromEntries(response.headers)
-  // Pages and their loader data never contain viewer data (sessions live on the
-  // device), so CloudFront may share them. 30s fresh plus 30s served stale while
-  // it refreshes keeps anonymous content at most about a minute old.
-  const shareable = headers['content-type']?.includes('text/html') || event.rawPath.startsWith('/_expo/loaders/')
-  if (shareable && response.status === 200 && !headers['cache-control']) {
-    headers['cache-control'] = 'public, max-age=0, s-maxage=30, stale-while-revalidate=30'
+  const compressible = COMPRESSIBLE.test(headers['content-type'] ?? '')
+  const compress = response.body && compressible ? compressor(event.headers['accept-encoding']) : undefined
+  if (compressible) headers.vary = headers.vary ? `${headers.vary}, accept-encoding` : 'accept-encoding'
+  if (compress) {
+    headers['content-encoding'] = compress.encoding
+    delete headers['content-length']
   }
   const stream = awslambda.HttpResponseStream.from(responseStream, {
     statusCode: response.status,
     headers,
     cookies: response.headers.getSetCookie(),
   })
-  if (response.body) await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), stream)
-  else stream.end()
+  if (!response.body) {
+    stream.end()
+    return
+  }
+  const body = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream)
+  if (compress) await pipeline(body, compress.stream, stream)
+  else await pipeline(body, stream)
 })

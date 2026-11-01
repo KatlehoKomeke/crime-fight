@@ -37,32 +37,24 @@ const CLIENT_PROVIDER: Record<SsoProvider, cognito.UserPoolClientIdentityProvide
 }
 
 /**
- * Requests pages through CloudFront one at a time (concurrency stays low while
- * the account's Lambda quota is small). An expired edge copy sends the request
- * on to the SSR Lambda, whose loader calls the GraphQL Lambda, so both stay warm.
- * Two passes a minute (EventBridge's smallest interval is one minute) because
- * an edge copy is usable for 60s at most: 30s fresh plus 30s stale.
+ * Requests pages through CloudFront one at a time, once a minute. Each reaches
+ * the SSR Lambda, whose loaders call the GraphQL Lambda, so an instance of both
+ * stays warm and visitors rarely meet a cold start.
  */
 const WARMER_SOURCE = `
-const pass = async () => {
+exports.handler = async () => {
   const log = []
   for (const path of process.env.WARM_PATHS.split(',')) {
     const started = Date.now()
     try {
       const res = await fetch(process.env.SITE_URL + path, { headers: { accept: 'text/html', 'accept-encoding': 'br, gzip', 'user-agent': 'civic-warmer' } })
       await res.arrayBuffer()
-      log.push(path + ' ' + res.status + ' ' + (res.headers.get('x-cache') || '') + ' ' + (Date.now() - started) + 'ms')
+      log.push(path + ' ' + res.status + ' ' + (Date.now() - started) + 'ms')
     } catch (error) {
       log.push(path + ' failed: ' + error)
     }
   }
   console.log(log.join(' | '))
-}
-exports.handler = async () => {
-  const started = Date.now()
-  await pass()
-  await new Promise((resolve) => setTimeout(resolve, Math.max(0, 30000 - (Date.now() - started))))
-  await pass()
 }
 `
 
@@ -72,6 +64,12 @@ exports.handler = async () => {
  *   /graphql                               → HTTP API (GraphQL Lambda)
  *   everything else                        → SSR Lambda (streaming Function URL)
  * Same-origin means no CORS for the browser and one TLS connection per visit.
+ *
+ * Pages and the API are not cached at the edge. CloudFront has no regional edge
+ * cache in Africa, so every cacheable miss from the Cape Town edge went via
+ * Europe and back: about +550ms, measured on every signed-in read and every
+ * page that wasn't already cached. Uncacheable requests go straight from the
+ * edge to af-south-1 instead, and the Lambdas compress their own responses.
  */
 export class WebStack extends Stack {
   constructor(scope: Construct, id: string, props: WebStackProps) {
@@ -170,22 +168,11 @@ export class WebStack extends Stack {
         origin: origins.FunctionUrlOrigin.withOriginAccessControl(ssrUrl),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-        // Honour the SSR response's Cache-Control (anonymous HTML: s-maxage=10, swr=60).
-        cachePolicy: new cloudfront.CachePolicy(this, 'SsrCache', {
-          minTtl: Duration.seconds(0),
-          defaultTtl: Duration.seconds(0),
-          maxTtl: Duration.hours(1),
-          queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
-          enableAcceptEncodingBrotli: true,
-          enableAcceptEncodingGzip: true,
-        }),
-        originRequestPolicy: new cloudfront.OriginRequestPolicy(this, 'SsrOrigin', {
-          queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
-          headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList('x-forwarded-host', 'accept-language', 'cloudfront-viewer-country'),
-        }),
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        // Includes Accept-Encoding (the function compresses) and x-forwarded-host.
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
         functionAssociations: [{ function: forwardHost, eventType: cloudfront.FunctionEventType.VIEWER_REQUEST }],
         responseHeadersPolicy: headers,
-        compress: true,
       },
       additionalBehaviors: {
         '/_expo/static/*': staticAssets,
@@ -196,21 +183,9 @@ export class WebStack extends Stack {
           origin: new origins.HttpOrigin(apiDomain, { protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY }),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-          // Honours the API's Cache-Control: signed-out GET reads are shared for
-          // ~a minute, everything else is no-store. Authorization is part of the
-          // key, so a signed-in request never gets a shared (or anyone else's) answer.
-          cachePolicy: new cloudfront.CachePolicy(this, 'ApiCache', {
-            minTtl: Duration.seconds(0),
-            defaultTtl: Duration.seconds(0),
-            maxTtl: Duration.minutes(1),
-            queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
-            headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Authorization'),
-            enableAcceptEncodingBrotli: true,
-            enableAcceptEncodingGzip: true,
-          }),
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
           responseHeadersPolicy: headers,
-          compress: true,
         },
       },
     })
@@ -245,7 +220,7 @@ export class WebStack extends Stack {
         handler: 'index.handler',
         code: lambda.Code.fromInline(WARMER_SOURCE),
         memorySize: 128,
-        timeout: Duration.seconds(50),
+        timeout: Duration.seconds(30),
         environment: { SITE_URL: siteUrl, WARM_PATHS: '/,/alerts,/explore,/map' },
         logGroup: new logs.LogGroup(this, 'WarmerLogs', { retention: logs.RetentionDays.ONE_WEEK }),
       })
