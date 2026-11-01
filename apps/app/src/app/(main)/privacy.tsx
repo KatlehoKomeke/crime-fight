@@ -49,7 +49,7 @@ const SECTIONS: LegalSection[] = [
     heading: 'Who can see what',
     blocks: [
       [
-        'Everyone: your handle, display name, bio, posts, replies, and follower and following counts. This includes people who aren’t signed in, and search engines.',
+        'Everyone: your handle, display name, bio, posts, replies, who you follow and who follows you. This includes people who aren’t signed in, and search engines.',
         'Only you: your email address and your saved posts.',
         'The people in a conversation: its messages. Only members who follow each other can message. Both keep the history, unless one of them deletes their account, which deletes the conversation for both.',
       ],

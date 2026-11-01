@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull, ne, notInArray, sql } from 'drizzle-orm'
 import type { Identity } from '../auth'
 import { apiError } from '../errors'
 import type { SignIns } from '../sign-ins'
+import { type Connection, decodeCursor, type PageArgs, pageSize, toConnection } from './pagination'
 
 const { users, follows } = schema
 
@@ -76,6 +77,27 @@ export async function trustedSources(db: Database, viewerId: string | null, limi
     )
     .orderBy(desc(users.verifiedAt), users.handle)
     .limit(limit)
+}
+
+/** Who follows `userId` (`followers`) or whom `userId` follows (`following`), most recent follow first. */
+export async function pageFollows(db: Database, userId: string, direction: 'followers' | 'following', args: PageArgs): Promise<Connection<User>> {
+  const limit = pageSize(args)
+  const cursor = args.after ? decodeCursor(args.after) : null
+  const [self, other] = direction === 'followers' ? [follows.followeeId, follows.followerId] : [follows.followerId, follows.followeeId]
+  const rows = await db
+    .select({ user: users, followedAt: follows.createdAt })
+    .from(follows)
+    .innerJoin(users, eq(users.id, other))
+    .where(and(eq(self, userId), cursor ? sql`(${follows.createdAt}, ${other}) < (${cursor.createdAt}::timestamptz, ${cursor.id}::uuid)` : undefined))
+    .orderBy(desc(follows.createdAt), desc(other))
+    .limit(limit + 1)
+  // Same opaque (timestamp, id) cursor as every other list, keyed on when the follow happened.
+  const page = toConnection(
+    rows.map(({ user, followedAt }) => ({ id: user.id, createdAt: followedAt, user })),
+    limit,
+    cursor !== null,
+  )
+  return { ...page, edges: page.edges.map(({ cursor: edgeCursor, node }) => ({ cursor: edgeCursor, node: node.user })) }
 }
 
 export async function searchUsers(db: Database, query: string, limit: number): Promise<User[]> {

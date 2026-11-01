@@ -12,6 +12,7 @@ import { ConversationQuery, MarkConversationRead, SendMessage } from '@/graphql/
 import { useAuth } from '@/lib/auth'
 import { useRealtimeReconnect } from '@/lib/graphql/provider'
 import { usePaginatedQuery } from '@/lib/graphql/use-paginated'
+import { profilePath } from '@/lib/profile'
 import { pageMetadata } from '@/lib/seo'
 import { useAppVisible } from '@/lib/use-app-visible'
 import { param } from '@/lib/variables'
@@ -137,7 +138,7 @@ export default function ConversationScreen() {
           back
           right={
             other ? (
-              <Link href={`/u/${other.handle}`} asChild>
+              <Link href={profilePath(other.handle)} asChild>
                 <Pressable accessibilityLabel={`${other.displayName} profile`}>
                   <Avatar initials={other.initials} url={other.avatarUrl} size={32} official={other.verified && other.role !== 'MEMBER'} />
                 </Pressable>

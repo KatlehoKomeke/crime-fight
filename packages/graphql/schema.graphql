@@ -311,6 +311,12 @@ type User {
   """
   email: String
   followerCount: Int!
+
+  """Who follows this account, most recent first."""
+  followers(after: String, before: String, first: Int, last: Int): UserConnection!
+
+  """Who this account follows, most recent first."""
+  following(after: String, before: String, first: Int, last: Int): UserConnection!
   followingCount: Int!
   handle: String!
   id: ID!
@@ -335,6 +341,16 @@ type User {
   """You follow each other, so you can exchange direct messages."""
   viewerCanMessage: Boolean!
   viewerIsFollowing: Boolean!
+}
+
+type UserConnection {
+  edges: [UserEdge!]!
+  pageInfo: PageInfo!
+}
+
+type UserEdge {
+  cursor: String!
+  node: User!
 }
 
 enum UserRole {

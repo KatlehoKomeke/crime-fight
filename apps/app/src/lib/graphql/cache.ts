@@ -5,10 +5,20 @@ import { ConversationQuery } from '@/graphql/documents'
 
 type Args = { id: string }
 
-const invalidateField = (cache: Cache, typename: string, field: string) => {
-  for (const info of cache.inspectFields(typename)) {
-    if (info.fieldName === field) cache.invalidate(typename, info.fieldName, info.arguments ?? undefined)
+/** Every cached variant (any arguments) of a field on `Query` or an entity key like `User:1`. */
+const invalidateField = (cache: Cache, entity: string, field: string) => {
+  for (const info of cache.inspectFields(entity)) {
+    if (info.fieldName === field) cache.invalidate(entity, info.fieldName, info.arguments ?? undefined)
   }
+}
+
+/** Following someone changes their followers and your following; both refetch the next time they're shown. */
+const followChanged = (args: Args, cache: Cache) => {
+  invalidateField(cache, cache.keyOfEntity({ __typename: 'User', id: args.id })!, 'followers')
+  const viewer = cache.resolve('Query', 'viewer') as string | null
+  if (!viewer) return
+  invalidateField(cache, viewer, 'following')
+  cache.invalidate(viewer, 'followingCount')
 }
 
 /** Counter after a toggle; unchanged if the flag already had that value (repeat taps). */
@@ -90,6 +100,8 @@ export const cacheConfig: CacheExchangeOpts = {
     PageInfo: () => null,
     PostConnection: () => null,
     PostEdge: () => null,
+    UserConnection: () => null,
+    UserEdge: () => null,
     NotificationConnection: () => null,
     NotificationEdge: () => null,
     ConversationConnection: () => null,
@@ -109,7 +121,7 @@ export const cacheConfig: CacheExchangeOpts = {
     },
     Conversation: { messages: relayPagination() },
     Post: { replies: relayPagination() },
-    User: { posts: relayPagination() },
+    User: { posts: relayPagination(), followers: relayPagination(), following: relayPagination() },
     Topic: { posts: relayPagination() },
   },
   optimistic: {
@@ -146,7 +158,11 @@ export const cacheConfig: CacheExchangeOpts = {
       deletePost: (_result, args, cache) => cache.invalidate({ __typename: 'Post', id: (args as Args).id }),
       savePost: (_result, _args, cache) => invalidateField(cache, 'Query', 'savedPosts'),
       unsavePost: (_result, _args, cache) => invalidateField(cache, 'Query', 'savedPosts'),
-      followUser: (_result, _args, cache) => invalidateField(cache, 'Query', 'trustedSources'),
+      followUser: (_result, args, cache) => {
+        invalidateField(cache, 'Query', 'trustedSources')
+        followChanged(args as Args, cache)
+      },
+      unfollowUser: (_result, args, cache) => followChanged(args as Args, cache),
       sendMessage: (result, _args, cache) => applyInboxEvent(result.sendMessage as InboxEventFieldsFragment, cache),
       markConversationRead: (result, _args, cache) => applyInboxEvent(result.markConversationRead as InboxEventFieldsFragment, cache),
     },

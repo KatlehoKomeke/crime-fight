@@ -1,3 +1,4 @@
+import { profilePath } from '@/lib/profile'
 import type { IconName } from '../Icon'
 
 export interface NavItem {
@@ -22,8 +23,9 @@ export function navItems(handle: string | null): NavItem[] {
       key: 'profile',
       label: 'Profile',
       icon: 'profile',
-      href: handle ? `/u/${handle}` : '/sign-in',
-      match: (p) => (handle ? p === `/u/${handle}` : p === '/sign-in'),
+      href: handle ? profilePath(handle) : '/sign-in',
+      // Your profile and its follow lists.
+      match: (p) => (handle ? p === profilePath(handle) || p.startsWith(`${profilePath(handle)}/`) : p === '/sign-in'),
       phone: true,
     },
     // Not in the phone tab bar (five tabs max); phones reach it from their own profile.

@@ -17,4 +17,8 @@ export function notificationsVariables(near: GeoPoint) {
   return { near, radiusKm: DEFAULT_RADIUS_KM, first: PAGE_SIZE }
 }
 
+export function followListVariables(handle: string) {
+  return { handle, first: PAGE_SIZE }
+}
+
 export const param = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) ?? ''

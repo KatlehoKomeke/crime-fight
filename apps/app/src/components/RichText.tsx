@@ -2,6 +2,7 @@ import { segmentBody } from '@civic/core'
 import { Link } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import { Platform, type StyleProp, Text, type TextStyle } from 'react-native'
+import { profilePath } from '@/lib/profile'
 import { fonts, useColors } from '@/theme'
 import { textStyles } from './ui'
 
@@ -21,7 +22,7 @@ export function RichText({ body, style, numberOfLines }: { body: string; style?:
             )
           case 'mention':
             return (
-              <Link key={index} href={`/u/${segment.handle}`} style={linkStyle}>
+              <Link key={index} href={profilePath(segment.handle)} style={linkStyle}>
                 {segment.text}
               </Link>
             )

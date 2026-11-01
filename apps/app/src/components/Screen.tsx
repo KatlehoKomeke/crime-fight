@@ -30,7 +30,8 @@ export function Screen({ title, header, children }: { title: string; header: Rea
   )
 }
 
-export function PageHeader({ title, subtitle, back, right }: { title: string; subtitle?: string; back?: boolean; right?: ReactNode }) {
+/** `children` sit under the title row, inside the sticky header (e.g. tabs). */
+export function PageHeader({ title, subtitle, back, right, children }: { title: string; subtitle?: string; back?: boolean; right?: ReactNode; children?: ReactNode }) {
   const c = useColors()
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -50,6 +51,7 @@ export function PageHeader({ title, subtitle, back, right }: { title: string; su
         </View>
         {right}
       </View>
+      {children}
     </View>
   )
 }

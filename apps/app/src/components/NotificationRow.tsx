@@ -2,6 +2,7 @@ import { formatRelativeTime } from '@civic/core'
 import type { NotificationsQuery } from '@civic/graphql'
 import { useRouter } from 'expo-router'
 import { Pressable, StyleSheet, View } from 'react-native'
+import { profilePath } from '@/lib/profile'
 import { useColors } from '@/theme'
 import { Icon, type IconName } from './Icon'
 import { PostCard } from './PostCard'
@@ -36,7 +37,7 @@ function Activity({ notification, kind, post }: { notification: NotificationNode
 
   return (
     <Pressable
-      onPress={() => router.push(post ? `/post/${post.id}` : `/u/${actor.handle}`)}
+      onPress={() => router.push(post ? `/post/${post.id}` : profilePath(actor.handle))}
       accessibilityRole="link"
       style={({ hovered }) => [styles.row, { borderBottomColor: c.line }, hovered && { backgroundColor: c.bg }]}
     >

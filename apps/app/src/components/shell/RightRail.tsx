@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import { useQuery } from 'urql'
 import { ShellQuery } from '@/graphql/documents'
+import { profilePath } from '@/lib/profile'
 import { fonts, layout, radius, useColors } from '@/theme'
 import { HoverLink } from '../HoverLink'
 import { Icon } from '../Icon'
@@ -135,7 +136,7 @@ function EmergencyCard() {
       <Txt variant="small" style={{ color: c.onInverseMuted, marginVertical: 10 }}>
         Connect with trauma support, victim advocates, and legal guidance — free and confidential.
       </Txt>
-      <Button label="Find support" tone="accent" size="md" onPress={() => router.push('/u/victimsupport')} style={{ borderRadius: radius.sm }} />
+      <Button label="Find support" tone="accent" size="md" onPress={() => router.push(profilePath('victimsupport'))} style={{ borderRadius: radius.sm }} />
       <Txt variant="small" style={{ color: c.onInverseMuted, marginTop: 10, fontSize: 11.5 }}>
         In immediate danger? Call 10111 (SAPS) or 112 from any phone.
       </Txt>

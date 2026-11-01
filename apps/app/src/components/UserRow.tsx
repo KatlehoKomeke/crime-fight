@@ -1,13 +1,14 @@
 import type { UserRowFieldsFragment } from '@civic/graphql'
 import { Link } from 'expo-router'
 import { Pressable, StyleSheet, View } from 'react-native'
+import { profilePath } from '@/lib/profile'
 import { FollowButton } from './FollowButton'
 import { Avatar, Txt, VerifiedBadge } from './ui'
 
 export function UserRow({ user, dense }: { user: UserRowFieldsFragment; dense?: boolean }) {
   return (
     <View style={[styles.row, dense ? styles.dense : { paddingHorizontal: 18 }]}>
-      <Link href={`/u/${user.handle}`} asChild>
+      <Link href={profilePath(user.handle)} asChild>
         <Pressable style={styles.identity} accessibilityLabel={`${user.displayName} profile`}>
           <Avatar initials={user.initials} url={user.avatarUrl} size={dense ? 36 : 44} official={user.verified && user.role !== 'MEMBER'} />
           <View style={styles.names}>

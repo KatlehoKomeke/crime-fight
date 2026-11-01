@@ -14,6 +14,7 @@ import { serverConfig } from '@/lib/config'
 import { useHydrate } from '@/lib/graphql/hydrate'
 import { prefetch } from '@/lib/graphql/prefetch'
 import { usePaginatedQuery } from '@/lib/graphql/use-paginated'
+import { profilePath } from '@/lib/profile'
 import { excerpt, pageMetadata } from '@/lib/seo'
 import { PAGE_SIZE, param } from '@/lib/variables'
 import { useColors } from '@/theme'
@@ -38,7 +39,7 @@ export async function generateMetadata(_request: ImmutableRequest | undefined, p
     type: 'article',
     image: post.media[0]?.url,
     publishedTime: post.createdAt,
-    extra: { authors: { name: post.author.displayName, url: `${serverConfig().siteUrl}/u/${post.author.handle}` } },
+    extra: { authors: { name: post.author.displayName, url: `${serverConfig().siteUrl}${profilePath(post.author.handle)}` } },
   })
 }
 

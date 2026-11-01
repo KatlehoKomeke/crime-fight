@@ -169,6 +169,52 @@ export const ProfileQuery = graphql(`
   }
 `)
 
+export const FollowersQuery = graphql(`
+  query Followers($handle: String!, $first: Int!, $after: String) {
+    user(handle: $handle) {
+      id
+      handle
+      displayName
+      isViewer
+      followers(first: $first, after: $after) {
+        edges {
+          cursor
+          node {
+            ...UserRowFields
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`)
+
+export const FollowingQuery = graphql(`
+  query Following($handle: String!, $first: Int!, $after: String) {
+    user(handle: $handle) {
+      id
+      handle
+      displayName
+      isViewer
+      following(first: $first, after: $after) {
+        edges {
+          cursor
+          node {
+            ...UserRowFields
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`)
+
 export const TopicQuery = graphql(`
   query Topic($slug: String!, $first: Int!, $after: String) {
     topic(slug: $slug) {

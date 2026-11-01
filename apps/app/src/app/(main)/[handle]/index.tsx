@@ -1,9 +1,11 @@
 import { formatCount, TRUST_BADGE_LABEL, type TrustBadge } from '@civic/core'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { Link, useLocalSearchParams, useRouter } from 'expo-router'
 import type { ImmutableRequest } from 'expo-router/server'
-import { StyleSheet, View } from 'react-native'
+import { useState } from 'react'
+import { Pressable, StyleSheet, View } from 'react-native'
 import { FollowButton } from '@/components/FollowButton'
 import { MessageButton } from '@/components/messages/MessageButton'
+import { NotFound } from '@/components/NotFound'
 import { PostList } from '@/components/PostList'
 import { PageHeader, Screen } from '@/components/Screen'
 import { Avatar, Button, EmptyState, Skeleton, TrustChip, Txt, VerifiedBadge } from '@/components/ui'
@@ -11,6 +13,7 @@ import { ProfileQuery } from '@/graphql/documents'
 import { useHydrate } from '@/lib/graphql/hydrate'
 import { prefetch } from '@/lib/graphql/prefetch'
 import { usePaginatedQuery } from '@/lib/graphql/use-paginated'
+import { profileHandle, profilePath } from '@/lib/profile'
 import { excerpt, pageMetadata } from '@/lib/seo'
 import { PAGE_SIZE, param } from '@/lib/variables'
 import { brand, useColors } from '@/theme'
@@ -18,25 +21,37 @@ import { brand, useColors } from '@/theme'
 const variables = (handle: string) => ({ handle, first: PAGE_SIZE })
 
 export function loader(_request: ImmutableRequest | undefined, params: Record<string, string | string[]>) {
-  return prefetch((fetch) => fetch(ProfileQuery, variables(param(params.handle))))
+  const handle = profileHandle(param(params.handle))
+  return handle ? prefetch((fetch) => fetch(ProfileQuery, variables(handle))) : null
 }
 
 export async function generateMetadata(_request: ImmutableRequest | undefined, params: Record<string, string | string[]>) {
-  const handle = param(params.handle)
-  let user: { displayName: string; bio: string; trustBadge: string | null } | null | undefined
+  const segment = param(params.handle)
+  const handle = profileHandle(segment)
+  if (!handle) return pageMetadata({ title: 'Not found', path: `/${encodeURIComponent(segment)}`, noindex: true })
+  let user: { handle: string; displayName: string; bio: string; trustBadge: string | null } | null | undefined
   await prefetch(async (fetch) => {
     user = (await fetch(ProfileQuery, variables(handle)))?.user
   })
-  if (!user) return pageMetadata({ title: 'Account not found', path: `/u/${handle}`, noindex: true })
+  if (!user) return pageMetadata({ title: 'Account not found', path: profilePath(handle), noindex: true })
   const badge = user.trustBadge ? ` · ${TRUST_BADGE_LABEL[user.trustBadge as TrustBadge]}` : ''
-  return pageMetadata({ title: `${user.displayName} (@${handle})${badge}`, description: excerpt(user.bio || `Updates from @${handle} on CIVIC/ONE.`), path: `/u/${handle}`, type: 'profile' })
+  return pageMetadata({
+    title: `${user.displayName} (@${user.handle})${badge}`,
+    description: excerpt(user.bio || `Updates from @${user.handle} on CIVIC/ONE.`),
+    path: profilePath(user.handle),
+    type: 'profile',
+  })
 }
 
-export default function ProfileScreen() {
+export default function ProfileRoute() {
+  const handle = profileHandle(param(useLocalSearchParams<{ handle: string }>().handle))
+  return handle ? <ProfileScreen handle={handle} /> : <NotFound />
+}
+
+function ProfileScreen({ handle }: { handle: string }) {
   useHydrate()
   const c = useColors()
   const router = useRouter()
-  const handle = param(useLocalSearchParams<{ handle: string }>().handle)
   const profile = usePaginatedQuery(ProfileQuery, variables(handle), (data) => data?.user?.posts)
   const user = profile.data?.user
 
@@ -92,12 +107,8 @@ export default function ProfileScreen() {
                   ) : null}
                   {user.bio ? <Txt style={{ marginTop: 12 }}>{user.bio}</Txt> : null}
                   <View style={styles.stats}>
-                    <Txt variant="small" color="textMuted">
-                      <Txt variant="smallStrong">{formatCount(user.followingCount)}</Txt> following
-                    </Txt>
-                    <Txt variant="small" color="textMuted">
-                      <Txt variant="smallStrong">{formatCount(user.followerCount)}</Txt> followers
-                    </Txt>
+                    <CountLink href={profilePath(user.handle, 'following')} count={user.followingCount} label="following" />
+                    <CountLink href={profilePath(user.handle, 'followers')} count={user.followerCount} label={user.followerCount === 1 ? 'follower' : 'followers'} />
                     <Txt variant="small" color="textMuted">
                       Joined {new Date(user.createdAt).toLocaleDateString('en', { month: 'long', year: 'numeric' })}
                     </Txt>
@@ -118,6 +129,20 @@ export default function ProfileScreen() {
   )
 }
 
+/** A follow count that opens the list behind it, underlined on hover like other links. */
+function CountLink({ href, count, label }: { href: string; count: number; label: string }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <Link href={href} asChild>
+      <Pressable onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}>
+        <Txt variant="small" color="textMuted" style={hovered && styles.hovered}>
+          <Txt variant="smallStrong">{formatCount(count)}</Txt> {label}
+        </Txt>
+      </Pressable>
+    </Link>
+  )
+}
+
 const styles = StyleSheet.create({
   banner: { height: 132, overflow: 'hidden' },
   bannerStripe: { position: 'absolute', right: -40, top: 0, bottom: 0, width: 180, transform: [{ skewX: '-18deg' }], opacity: 0.92 },
@@ -127,4 +152,5 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginTop: 12 },
+  hovered: { textDecorationLine: 'underline' },
 })

@@ -3,6 +3,7 @@ import type { Post, PostMedia, Topic, User } from '@civic/db'
 import type { Trend } from '../data/topics'
 import { NOTIFICATION_KINDS, type Notification } from '../data/notifications'
 import { filters, pagePosts, pageReplies } from '../data/posts'
+import { pageFollows } from '../data/users'
 import { builder } from './builder'
 
 export const PostKind = builder.enumType('PostKind', { values: POST_KINDS })
@@ -31,6 +32,7 @@ export const TrendRef = builder.objectRef<Trend>('Trend')
 export const NotificationRef = builder.objectRef<Notification>('Notification')
 
 export const PostConnection = builder.connectionObject({ type: PostRef, name: 'PostConnection' }, { name: 'PostEdge' })
+export const UserConnection = builder.connectionObject({ type: UserRef, name: 'UserConnection' }, { name: 'UserEdge' })
 export const NotificationConnection = builder.connectionObject({ type: NotificationRef, name: 'NotificationConnection' }, { name: 'NotificationEdge' })
 
 UserRef.implement({
@@ -60,6 +62,14 @@ UserRef.implement({
       resolve: async (user, _, ctx) => ((await ctx.viewer())?.id === user.id ? user.email : null),
     }),
     posts: t.connection({ type: PostRef, resolve: (user, args, ctx) => pagePosts(ctx.db, filters.byAuthor(user.id), args) }, PostConnection),
+    followers: t.connection(
+      { type: UserRef, description: 'Who follows this account, most recent first.', resolve: (user, args, ctx) => pageFollows(ctx.db, user.id, 'followers', args) },
+      UserConnection,
+    ),
+    following: t.connection(
+      { type: UserRef, description: 'Who this account follows, most recent first.', resolve: (user, args, ctx) => pageFollows(ctx.db, user.id, 'following', args) },
+      UserConnection,
+    ),
   }),
 })
 

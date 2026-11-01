@@ -8,6 +8,7 @@ import { ActivityIndicator, Modal, Platform, Pressable, Share, StyleSheet, View 
 import { useMutation } from 'urql'
 import { DeletePost, LikePost, RepostPost, SavePost, UnlikePost, UnrepostPost, UnsavePost } from '@/graphql/documents'
 import { getConfig } from '@/lib/config'
+import { profilePath } from '@/lib/profile'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { fonts, radius, useColors } from '@/theme'
 import { useCompose } from './ComposeProvider'
@@ -36,7 +37,7 @@ export const PostCard = memo(function PostCard({ post, variant = 'feed' }: { pos
       accessibilityState={{ busy: deleting }}
       style={({ hovered }) => [styles.post, { borderBottomColor: c.line }, hovered && !detail && !deleting && { backgroundColor: c.bg }, deleting && styles.deleting]}
     >
-      <Link href={`/u/${post.author.handle}`} asChild>
+      <Link href={profilePath(post.author.handle)} asChild>
         <Pressable accessibilityLabel={`${post.author.displayName} profile`}>
           <Avatar initials={post.author.initials} url={post.author.avatarUrl} official={official} />
         </Pressable>
@@ -45,7 +46,7 @@ export const PostCard = memo(function PostCard({ post, variant = 'feed' }: { pos
       <View style={styles.main}>
         <View style={styles.head}>
           <View style={styles.byline}>
-            <Link href={`/u/${post.author.handle}`} style={[styles.name, { color: c.text }]} numberOfLines={1}>
+            <Link href={profilePath(post.author.handle)} style={[styles.name, { color: c.text }]} numberOfLines={1}>
               {post.author.displayName}
             </Link>
             {post.author.verified ? <VerifiedBadge size={15} /> : null}
@@ -64,7 +65,7 @@ export const PostCard = memo(function PostCard({ post, variant = 'feed' }: { pos
         {post.replyTo ? (
           <Txt variant="small" color="textMuted" style={{ marginTop: 2 }}>
             Replying to{' '}
-            <Link href={`/u/${post.replyTo.author.handle}`} style={{ color: c.accentText }}>
+            <Link href={profilePath(post.replyTo.author.handle)} style={{ color: c.accentText }}>
               @{post.replyTo.author.handle}
             </Link>
           </Txt>

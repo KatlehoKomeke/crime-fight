@@ -256,6 +256,38 @@ describe('trends and sources', () => {
   })
 })
 
+describe('follow lists', () => {
+  const LISTS = `query($handle: String!, $first: Int, $after: String) {
+    user(handle: $handle) {
+      followers(first: $first, after: $after) { edges { node { handle } } pageInfo { hasNextPage endCursor } }
+      following(first: $first, after: $after) { edges { node { handle } } pageInfo { hasNextPage endCursor } }
+    }
+  }`
+  const handles = (connection: { edges: Array<{ node: { handle: string } }> }) => connection.edges.map((e) => e.node.handle)
+  const userId = async (h: string) => (await handle.db.select().from(schema.users).where(eq(schema.users.handle, h)))[0]!.id
+
+  it('lists who follows an account and whom it follows, to anyone, without gaps or repeats', async () => {
+    const support = await userId('victimsupport')
+    const soon = (minutes: number) => new Date(Date.now() + minutes * 60_000)
+    await handle.db.insert(schema.follows).values([
+      { followerId: await userId('jordan_o'), followeeId: support, createdAt: soon(1) },
+      { followerId: await userId('thandi_m'), followeeId: support, createdAt: soon(2) },
+    ])
+
+    const first = await gql(LISTS, { handle: 'victimsupport', first: 2 })
+    expect(handles(first.data.user.followers)).toEqual(['thandi_m', 'jordan_o'])
+    expect(first.data.user.followers.pageInfo.hasNextPage).toBe(true)
+
+    const rest = await gql(LISTS, { handle: 'victimsupport', first: 2, after: first.data.user.followers.pageInfo.endCursor })
+    expect(handles(rest.data.user.followers).sort()).toEqual(['alexm', 'civicone'])
+    expect(rest.data.user.followers.pageInfo.hasNextPage).toBe(false)
+
+    const alex = await gql(LISTS, { handle: 'alexm', first: 10 })
+    expect(handles(alex.data.user.following).sort()).toEqual(['civicone', 'metro_updates', 'victimsupport'])
+    expect(handles(alex.data.user.followers)).toEqual([])
+  })
+})
+
 describe('mutations', () => {
   const firstPostId = async () => (await gql(FEED, { first: 1 })).data.feed.edges[0].node.id as string
 
