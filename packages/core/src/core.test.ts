@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { checkPrivacy, coarsen, distanceKm, extractTopics, formatCount, formatRelativeTime, hasBlockingFinding, initialsFor, segmentBody, trustBadgeFor } from './index'
+import { checkPrivacy, coarsen, distanceKm, extractTopics, formatCount, formatRelativeTime, initialsFor, segmentBody, trustBadgeFor } from './index'
 import { createPostSchema } from './schemas'
 
 describe('privacy', () => {
-  it('blocks Luhn-valid ID numbers and card numbers', () => {
+  it('flags Luhn-valid ID numbers and card numbers as dangerous', () => {
     const findings = checkPrivacy('Suspect ID 8001015009087, paid with 4111 1111 1111 1111')
-    expect(findings.map((f) => f.kind)).toEqual(['NATIONAL_ID', 'PAYMENT_CARD'])
-    expect(hasBlockingFinding(findings)).toBe(true)
+    expect(findings.map((f) => [f.kind, f.level])).toEqual([
+      ['NATIONAL_ID', 'danger'],
+      ['PAYMENT_CARD', 'danger'],
+    ])
+  })
+
+  it('words findings for private messages differently from public posts', () => {
+    const [post] = checkPrivacy('My ID is 8001015009087')
+    const [message] = checkPrivacy('My ID is 8001015009087', 'private')
+    expect(post?.message).toMatch(/Remove it/)
+    expect(message?.message).toMatch(/someone you trust/)
   })
 
   it('ignores 13-digit strings that fail the ID checksum', () => {
@@ -17,7 +26,7 @@ describe('privacy', () => {
     const text = 'Call 082 555 1234 or mail tips@example.com — it happened at 14 Harbor Avenue'
     const kinds = checkPrivacy(text).map((f) => f.kind)
     expect(kinds).toEqual(['PHONE', 'EMAIL', 'STREET_ADDRESS'])
-    expect(hasBlockingFinding(checkPrivacy(text))).toBe(false)
+    expect(checkPrivacy(text).every((f) => f.level === 'warn')).toBe(true)
   })
 
   it('leaves ordinary civic updates alone', () => {

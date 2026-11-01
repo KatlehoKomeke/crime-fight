@@ -1,16 +1,19 @@
 /**
- * Privacy guard for community posts. Runs on-device as the user types (no
- * network round trip) and again on the server, which is authoritative.
+ * Privacy guard for posts and direct messages. Runs on-device as the user
+ * types (no network round trip) and flags personal data before it is shared.
  *
- * `block` findings stop a post from publishing; `warn` findings are shown but
- * the author may proceed.
+ * It warns and never blocks: the author decides. `danger` findings (ID and
+ * card numbers) are shown more prominently than `warn` ones.
  */
 
 export type PrivacyFindingKind = 'EMAIL' | 'PHONE' | 'NATIONAL_ID' | 'PAYMENT_CARD' | 'STREET_ADDRESS'
 
+/** Where the text is going: a public post or a private message to one person. */
+export type PrivacyAudience = 'public' | 'private'
+
 export interface PrivacyFinding {
   kind: PrivacyFindingKind
-  level: 'block' | 'warn'
+  level: 'danger' | 'warn'
   start: number
   end: number
   message: string
@@ -20,7 +23,7 @@ interface Rule {
   kind: PrivacyFindingKind
   level: PrivacyFinding['level']
   pattern: RegExp
-  message: string
+  message: Record<PrivacyAudience, string>
   validate?: (match: string) => boolean
 }
 
@@ -49,9 +52,12 @@ const STREET_SUFFIXES = [
 const RULES: Rule[] = [
   {
     kind: 'PAYMENT_CARD',
-    level: 'block',
+    level: 'danger',
     pattern: /\b(?:\d[ -]?){12,18}\d\b/g,
-    message: 'Looks like a card number. Never post payment details.',
+    message: {
+      public: 'Looks like a card number. Never post payment details.',
+      private: 'Looks like a card number. Nobody genuine needs your card details in a message.',
+    },
     validate: (m) => {
       const d = digitsOf(m)
       return d.length >= 13 && d.length <= 19 && d.length !== 13 && luhn(d)
@@ -59,23 +65,32 @@ const RULES: Rule[] = [
   },
   {
     kind: 'NATIONAL_ID',
-    level: 'block',
+    level: 'danger',
     // South African ID: YYMMDD SSSS C A Z, Luhn-checked.
     pattern: /\b\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{7}\b/g,
-    message: 'Looks like an ID number. Remove it to protect the person involved.',
+    message: {
+      public: 'Looks like an ID number. Remove it to protect the person involved.',
+      private: 'Looks like an ID number. Only share it with someone you trust.',
+    },
     validate: (m) => luhn(m),
   },
   {
     kind: 'EMAIL',
     level: 'warn',
     pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
-    message: 'Email address detected. Only share contact details for official services.',
+    message: {
+      public: 'Email address detected. Only share contact details for official services.',
+      private: 'Email address. Only share it with someone you trust.',
+    },
   },
   {
     kind: 'PHONE',
     level: 'warn',
     pattern: /(?<![\d+])(?:\+\d{1,3}[\s-]?)?(?:\(\d{2,4}\)|\d{2,4})[\s-]?\d{3}[\s-]?\d{3,4}(?!\d)/g,
-    message: 'Phone number detected. Only share numbers for official services.',
+    message: {
+      public: 'Phone number detected. Only share numbers for official services.',
+      private: 'Phone number. Only share it with someone you trust.',
+    },
     validate: (m) => {
       const d = digitsOf(m)
       return d.length >= 9 && d.length <= 13
@@ -85,11 +100,14 @@ const RULES: Rule[] = [
     kind: 'STREET_ADDRESS',
     level: 'warn',
     pattern: new RegExp(String.raw`\b\d{1,5}[A-Za-z]?\s+(?:[A-Z][a-z'-]+\s+){1,3}(?:${STREET_SUFFIXES})\b\.?`, 'g'),
-    message: 'Exact address detected. Describe the area or nearest intersection instead.',
+    message: {
+      public: 'Exact address detected. Describe the area or nearest intersection instead.',
+      private: 'Exact address. Only share it with someone you trust.',
+    },
   },
 ]
 
-export function checkPrivacy(text: string): PrivacyFinding[] {
+export function checkPrivacy(text: string, audience: PrivacyAudience = 'public'): PrivacyFinding[] {
   const findings: PrivacyFinding[] = []
   const taken: Array<[number, number]> = []
   const overlaps = (start: number, end: number) => taken.some(([s, e]) => start < e && end > s)
@@ -102,10 +120,9 @@ export function checkPrivacy(text: string): PrivacyFinding[] {
       if (overlaps(start, end)) continue
       if (rule.validate && !rule.validate(match[0])) continue
       taken.push([start, end])
-      findings.push({ kind: rule.kind, level: rule.level, start, end, message: rule.message })
+      findings.push({ kind: rule.kind, level: rule.level, start, end, message: rule.message[audience] })
     }
   }
   return findings.sort((a, b) => a.start - b.start)
 }
 
-export const hasBlockingFinding = (findings: PrivacyFinding[]) => findings.some((f) => f.level === 'block')

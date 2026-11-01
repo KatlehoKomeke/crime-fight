@@ -1,10 +1,13 @@
 import { createDb, dbConfigFromEnv } from '@civic/db'
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context as LambdaContext } from 'aws-lambda'
 import { readEnv } from '../env'
+import { appSyncPublisher } from '../realtime/publisher'
 import { createApi } from '../yoga'
 
 // Created once per container and reused across invocations.
-const api = createApi({ db: createDb(dbConfigFromEnv()).db, env: readEnv() })
+const env = readEnv()
+const realtime = env.realtimeHost ? appSyncPublisher({ host: env.realtimeHost, region: process.env.AWS_REGION ?? 'af-south-1' }) : undefined
+const api = createApi({ db: createDb(dbConfigFromEnv()).db, env, realtime })
 
 /**
  * Signed-out reads (persisted queries arrive as GET) return the same data to

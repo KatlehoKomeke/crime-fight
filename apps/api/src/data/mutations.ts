@@ -1,4 +1,4 @@
-import { canPublishAlerts, checkPrivacy, coarsen, extractTopics, hasBlockingFinding } from '@civic/core'
+import { canPublishAlerts, coarsen, extractTopics } from '@civic/core'
 import { createPostSchema, type CreatePostInput } from '@civic/core/schemas'
 import { type Database, type Post, schema, type User } from '@civic/db'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
@@ -18,14 +18,8 @@ export async function createPost(db: Database, author: User, raw: CreatePostInpu
   }
   const input = parsed.data
 
-  // The client runs the same check as you type; the server is authoritative.
-  const findings = checkPrivacy(input.body)
-  if (hasBlockingFinding(findings)) {
-    throw badInput('This post contains personal information that cannot be published.', {
-      privacy: findings.map(({ kind, level, start, end, message }) => ({ kind, level, start, end, message })),
-    })
-  }
-
+  // Personal details are flagged in the composer as you type, but never
+  // blocked: the author decides (see @civic/core privacy).
   const official = canPublishAlerts(author.role, author.verifiedAt !== null)
   if (input.kind !== 'UPDATE' && !official) throw forbidden('Only verified officials and newsrooms can publish alerts')
   // Officials report exact incident locations; everyone else is coarsened to ~1 km.

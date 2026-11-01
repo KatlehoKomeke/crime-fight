@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import type { Database } from './client'
-import { follows, postMedia, posts, postTopics, saves, topics, users } from './schema'
+import { conversationMembers, conversations, directKey, follows, messages, postMedia, posts, postTopics, saves, topics, users } from './schema'
 import { fillerPosts, seedPosts, seedTopics, seedUsers } from './seed-data'
 
 /** Replaces all data with the demo dataset. Timestamps are relative to now so the feed always looks live. */
@@ -8,7 +8,7 @@ export async function seed(db: Database): Promise<{ users: number; posts: number
   const now = Date.now()
   const ago = (minutes: number) => new Date(now - minutes * 60_000)
 
-  await db.execute(sql`truncate table users, topics restart identity cascade`)
+  await db.execute(sql`truncate table users, topics, conversations restart identity cascade`)
 
   const userRows = await db
     .insert(users)
@@ -62,6 +62,28 @@ export async function seed(db: Database): Promise<{ users: number; posts: number
     .insert(follows)
     .values(['civicone', 'metro_updates', 'victimsupport'].map((handle) => ({ followerId: userId.alexm!, followeeId: userId[handle]! })))
   await db.insert(saves).values({ userId: userId.alexm!, postId: postId.fraud! })
+
+  // Messages need mutual follows. The newsroom and the support service follow
+  // each other and have a thread going; Victim Support hasn't read the latest.
+  const [newsroom, support] = [userId.civicone!, userId.victimsupport!]
+  await db.insert(follows).values([
+    { followerId: newsroom, followeeId: support },
+    { followerId: support, followeeId: newsroom },
+  ])
+  const thread = [
+    { from: newsroom, minutesAgo: 95, body: 'Hi team, we’re publishing an explainer on the SIM-swap fraud wave tonight. Can we point readers to you for support?' },
+    { from: support, minutesAgo: 60, body: 'Yes please. Link to our profile rather than a number, and ask readers not to share screenshots that show account details.' },
+    { from: newsroom, minutesAgo: 12, body: 'Will do. It goes live at 19:00; I’ll send you the link before then.' },
+  ]
+  const [conversation] = await db
+    .insert(conversations)
+    .values({ directKey: directKey(newsroom, support), lastMessageAt: ago(12) })
+    .returning({ id: conversations.id })
+  await db.insert(conversationMembers).values([
+    { conversationId: conversation!.id, userId: newsroom, lastReadAt: ago(12) },
+    { conversationId: conversation!.id, userId: support, lastReadAt: ago(60) },
+  ])
+  await db.insert(messages).values(thread.map((m) => ({ conversationId: conversation!.id, senderId: m.from, body: m.body, createdAt: ago(m.minutesAgo) })))
 
   return { users: userRows.length, posts: allPosts.length, topics: topicRows.length }
 }

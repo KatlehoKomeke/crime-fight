@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib'
 import type * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2'
+import type * as appsync from 'aws-cdk-lib/aws-appsync'
 import * as acm from 'aws-cdk-lib/aws-certificatemanager'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
@@ -23,6 +24,8 @@ import type { SsoProvider } from './auth-stack'
 interface WebStackProps extends StackProps {
   config: StageConfig
   api: apigwv2.HttpApi
+  /** AppSync Events API the app connects to for live messages. */
+  realtime: appsync.IEventApi
   userPool: cognito.IUserPool
   cognitoDomain: string
   ssoProviders: SsoProvider[]
@@ -73,7 +76,7 @@ exports.handler = async () => {
 export class WebStack extends Stack {
   constructor(scope: Construct, id: string, props: WebStackProps) {
     super(scope, id, props)
-    const { config, api, userPool, cognitoDomain, ssoProviders } = props
+    const { config, api, realtime, userPool, cognitoDomain, ssoProviders } = props
     const stage = config.stage
 
     const client = fromRoot('apps/app/dist/client')
@@ -115,6 +118,8 @@ export class WebStack extends Stack {
         CIVIC_PUBLIC_API_URL: '/graphql',
         CIVIC_API_INTERNAL_URL: `https://${apiDomain}/graphql`,
         CIVIC_PERSISTED_QUERIES: 'true',
+        CIVIC_REALTIME_URL: `wss://${realtime.realtimeDns}/event/realtime`,
+        CIVIC_REALTIME_HOST: realtime.httpDns,
         CIVIC_PUBLIC_CONFIG_PARAM: publicConfigParam,
       },
     })

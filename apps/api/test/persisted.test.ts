@@ -12,6 +12,8 @@ describe('persisted operations', () => {
       const name = /\b(?:query|mutation|subscription) (\w+)/.exec(source)?.[1] ?? source.slice(0, 40)
       visit(parse(source), {
         SelectionSet(node, _key, parent) {
+          // A subscription may select exactly one root field, so its root can't add __typename (nor needs it).
+          if (parent && 'kind' in parent && parent.kind === Kind.OPERATION_DEFINITION && parent.operation === 'subscription') return
           if (!node.selections.some((selection) => selection.kind === Kind.FIELD && selection.name.value === '__typename')) {
             const at = parent && 'name' in parent && parent.name ? parent.name.value : '(root)'
             missing.push(`${name}: ${at}`)

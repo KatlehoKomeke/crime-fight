@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MESSAGE_MAX_LENGTH } from './message'
 import { ALERT_SEVERITIES, POST_KINDS, POST_MAX_LENGTH } from './post'
 
 /*
@@ -32,3 +33,8 @@ export const createPostSchema = z
   })
 
 export type CreatePostInput = z.input<typeof createPostSchema>
+
+export const messageBodySchema = z
+  .string()
+  .transform((value) => value.trim())
+  .pipe(z.string().min(1, 'Write a message first').max(MESSAGE_MAX_LENGTH, `Keep it under ${MESSAGE_MAX_LENGTH} characters`))

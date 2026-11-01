@@ -7,10 +7,10 @@ Verified local safety updates, official alerts, victim support and the people ke
 | **App** (web SSR · iOS · Android · desktop) | Expo SDK 58, Expo Router (streaming SSR, loaders, metadata), React Native 0.88, urql + Graphcache |
 | **API** | GraphQL Yoga 6 + Pothos 4 (code-first), DataLoader, persisted operations, Cognito JWT auth |
 | **Data** | Aurora PostgreSQL 17 Serverless v2 + PostGIS, Drizzle ORM, RDS Data API |
-| **Infra** | AWS CDK: CloudFront, Lambda (SSR + API), API Gateway, Aurora, Cognito, S3 |
+| **Infra** | AWS CDK: CloudFront, Lambda (SSR + API), API Gateway, AppSync Events (realtime), Aurora, Cognito, S3 |
 | **Delivery** | GitHub Actions: CI on every PR; every push to `main` deploys **QA**, smoke-tests it, then promotes to **prod** |
 
-Why these choices: [ADR 0001 universal app](docs/adr/0001-universal-app.md) · [ADR 0002 database research](docs/adr/0002-database.md) · [ADR 0003 GraphQL API](docs/adr/0003-graphql-api.md) · [ADR 0004 AWS delivery](docs/adr/0004-aws-delivery.md)
+Why these choices: [ADR 0001 universal app](docs/adr/0001-universal-app.md) · [ADR 0002 database research](docs/adr/0002-database.md) · [ADR 0003 GraphQL API](docs/adr/0003-graphql-api.md) · [ADR 0004 AWS delivery](docs/adr/0004-aws-delivery.md) · [ADR 0005 direct messages](docs/adr/0005-direct-messages.md)
 
 ## What's better than the prototype
 
@@ -19,7 +19,8 @@ The prototype was one 289-line component with hard-coded posts. This version kee
 - **Server-rendered, crawlable pages:** real posts in the HTML, per-page titles and Open Graph, canonical URLs and JSON-LD. Dark mode and responsive layout are correct on first paint (CSS variables and media queries, no flash).
 - **Feeds that work:** For you · Nearby (PostGIS radius) · Following, infinite scroll, threaded replies, topics from `#hashtags`, people and post search, saved posts and profiles.
 - **Trust you can't fake:** "Verified update / Official source" badges come from verified roles, not post text. Only verified officials and newsrooms can publish alerts.
-- **Privacy by default:** the composer flags ID numbers, card numbers, phone numbers, emails and street addresses *as you type* (no network call) and blocks the dangerous ones. The API re-checks with the same code. Member locations are coarsened to about 1 km.
+- **Privacy by default:** the composer flags ID numbers, card numbers, phone numbers, emails and street addresses *as you type* (no network call). It warns and never blocks: the author decides. Member locations are coarsened to about 1 km.
+- **Private messages:** instant one-to-one conversations between people who follow each other, delivered live over AppSync Events, with unread badges that stay in step across devices.
 - **Live radar:** nearby updates plotted by distance and severity (replaces the static "Live map" link).
 - **Instant interactions:** optimistic likes, reposts, saves and follows over a normalised cache, so one change updates every screen.
 - **Accessible:** semantic roles, labels, live-region toasts, reduced-motion support, visible focus rings, and body text at 15px instead of 8–9px.
@@ -48,7 +49,7 @@ Prerequisites: Node 24, Docker, and pnpm (`corepack enable`).
 pnpm install
 pnpm db:up                 # Postgres 17 + PostGIS on localhost:54329
 pnpm db:migrate && pnpm db:seed
-pnpm dev                   # API on :4000/graphql (GraphiQL) + Expo on :8081 (press w for web, i/a for simulators)
+pnpm dev                   # API on :4000/graphql (GraphiQL, plus realtime on ws://…:4000/event/realtime) + Expo on :8081 (press w for web, i/a for simulators)
 ```
 
 Locally, sign-in uses **dev mode**: `/sign-in` lists demo accounts (a member, a verified official, a newsroom and a support service), so you can try every permission level without Cognito. Deployed stages use **Google and Apple sign-in only** (see below).
@@ -96,7 +97,7 @@ Native builds also need `EXPO_PUBLIC_SSO_PROVIDERS=apple,google` in their EAS en
 
 ### Mobile and desktop releases
 
-- **iOS / Android:** run the *Mobile builds* workflow (EAS). Needs an `EXPO_TOKEN` secret, and these variables in the EAS project's `preview`/`production` environments: `EXPO_PUBLIC_API_URL` (`<SiteUrl>/graphql`), `EXPO_PUBLIC_SITE_URL`, `EXPO_PUBLIC_COGNITO_DOMAIN`, `EXPO_PUBLIC_COGNITO_CLIENT_ID` (all from the stack outputs).
+- **iOS / Android:** run the *Mobile builds* workflow (EAS). Needs an `EXPO_TOKEN` secret, and these variables in the EAS project's `preview`/`production` environments: `EXPO_PUBLIC_API_URL` (`<SiteUrl>/graphql`), `EXPO_PUBLIC_SITE_URL`, `EXPO_PUBLIC_COGNITO_DOMAIN`, `EXPO_PUBLIC_COGNITO_CLIENT_ID`, `EXPO_PUBLIC_REALTIME_URL`, `EXPO_PUBLIC_REALTIME_HOST` (all from the stack outputs; the last two are the Api stack's `RealtimeUrl` and `RealtimeHost`).
 - **Desktop:** push a `desktop-v*` tag or run *Desktop builds*. Set the `PROD_SITE_URL` repository variable; add signing secrets for notarised builds.
 - **Wearables:** Wear OS runs the Android build; watchOS needs a small SwiftUI target (no JavaScript framework compiles to watchOS UI). See [ADR 0001](docs/adr/0001-universal-app.md#platform-matrix).
 
@@ -108,4 +109,4 @@ Native builds also need `EXPO_PUBLIC_SSO_PROVIDERS=apple,google` in their EAS en
 | CDK stacks | ✅ Synthesize; Lambda bundles invoked locally against Postgres. **Not yet deployed to AWS.** |
 | GitHub Actions | ✅ Written; runs once the repo is pushed and the one-time setup is done |
 | iOS / Android binaries | ⚙️ Configured for EAS; not built yet (needs Expo + Apple/Google accounts) |
-| Next up | Real-time alerts (subscriptions), image uploads + moderation queue, WAF, CSP, watchOS/Wear OS glance, bundle-size work |
+| Next up | Push notifications for messages, real-time alerts (reusing the messaging pipe), image uploads + moderation queue, WAF, CSP, watchOS/Wear OS glance, bundle-size work |

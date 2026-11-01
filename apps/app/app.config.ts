@@ -53,6 +53,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     cognitoDomain: process.env.EXPO_PUBLIC_COGNITO_DOMAIN,
     cognitoClientId: process.env.EXPO_PUBLIC_COGNITO_CLIENT_ID,
     ssoProviders: process.env.EXPO_PUBLIC_SSO_PROVIDERS,
+    realtimeUrl: process.env.EXPO_PUBLIC_REALTIME_URL,
+    realtimeHost: process.env.EXPO_PUBLIC_REALTIME_HOST,
     eas: process.env.EAS_PROJECT_ID ? { projectId: process.env.EAS_PROJECT_ID } : undefined,
   },
 })

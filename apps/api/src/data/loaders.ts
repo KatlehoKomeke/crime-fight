@@ -1,6 +1,7 @@
 import { type Database, type Post, type PostMedia, schema, type Topic, type User } from '@civic/db'
 import DataLoader from 'dataloader'
 import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm'
+import { createMessagingLoaders } from './messaging'
 
 const { users, posts, postMedia, postTopics, topics, likes, saves, reposts, follows } = schema
 
@@ -38,6 +39,7 @@ export function createLoaders(db: Database, viewerId: () => Promise<string | nul
     })
 
   return {
+    ...createMessagingLoaders(db, viewerId),
     user: new DataLoader<string, User | null>(async (ids) =>
       byId(ids, await db.select().from(users).where(inArray(users.id, [...ids])), (u) => u.id),
     ),

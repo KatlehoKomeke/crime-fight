@@ -156,7 +156,59 @@ export const postTopics = pgTable(
   (t) => [primaryKey({ columns: [t.postId, t.topicId] }), index('post_topics_topic_idx').on(t.topicId)],
 )
 
+/*
+ * Direct messages. Membership is a table, not two columns, so group
+ * conversations can be added later without reshaping the data; for now every
+ * conversation is between exactly two people.
+ */
+/** `conversations.direct_key` for two users: sorted, so either member computes the same key. */
+export const directKey = (a: string, b: string) => [a, b].sort().join(':')
+
+export const conversations = pgTable('conversations', {
+  id: uuid().primaryKey().defaultRandom(),
+  /** See `directKey`: at most one conversation per pair. */
+  directKey: text().unique(),
+  /** Orders the inbox. Null until the first message, so empty conversations stay hidden. */
+  lastMessageAt: ts(),
+  createdAt: createdAt(),
+})
+
+export const conversationMembers = pgTable(
+  'conversation_members',
+  {
+    conversationId: uuid()
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Messages after this are unread. Sending a message moves it forward. */
+    lastReadAt: ts(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.conversationId, t.userId] }), index('conversation_members_user_idx').on(t.userId)],
+)
+
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    conversationId: uuid()
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    senderId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    body: text().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('messages_conversation_idx').on(t.conversationId, t.createdAt.desc(), t.id.desc())],
+)
+
 export type User = typeof users.$inferSelect
 export type Post = typeof posts.$inferSelect
 export type PostMedia = typeof postMedia.$inferSelect
 export type Topic = typeof topics.$inferSelect
+export type Conversation = typeof conversations.$inferSelect
+export type ConversationMember = typeof conversationMembers.$inferSelect
+export type Message = typeof messages.$inferSelect

@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import type { ImmutableRequest } from 'expo-router/server'
 import { StyleSheet, View } from 'react-native'
 import { FollowButton } from '@/components/FollowButton'
+import { MessageButton } from '@/components/messages/MessageButton'
 import { PostList } from '@/components/PostList'
 import { PageHeader, Screen } from '@/components/Screen'
 import { Avatar, Button, EmptyState, Skeleton, TrustChip, Txt, VerifiedBadge } from '@/components/ui'
@@ -68,7 +69,11 @@ export default function ProfileScreen() {
                   // Settings holds profile editing and sign-out; phones have no rail link to it.
                   <Button label="Settings" tone="outline" size="sm" icon="settings" onPress={() => router.push('/settings')} />
                 ) : user ? (
-                  <FollowButton userId={user.id} following={user.viewerIsFollowing} name={user.displayName} size="md" />
+                  <View style={styles.actions}>
+                    {/* Messages are open only between people who follow each other. */}
+                    {user.viewerCanMessage ? <MessageButton userId={user.id} name={user.displayName} /> : null}
+                    <FollowButton userId={user.id} following={user.viewerIsFollowing} name={user.displayName} size="md" />
+                  </View>
                 ) : null}
               </View>
               {user ? (
@@ -119,6 +124,7 @@ const styles = StyleSheet.create({
   hero: { paddingHorizontal: 18, paddingBottom: 16 },
   heroTop: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: -44 },
   avatarRing: { borderWidth: 4, borderRadius: 50 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginTop: 12 },
 })

@@ -1,6 +1,7 @@
 import { CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib'
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2'
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations'
+import * as appsync from 'aws-cdk-lib/aws-appsync'
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch'
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions'
 import type * as cognito from 'aws-cdk-lib/aws-cognito'
@@ -34,12 +35,32 @@ export const bundling: nodejs.BundlingOptions = {
 }
 
 /**
+ * The `inbox` namespace's event handlers (APPSYNC_JS). The API names each
+ * user's channel `/inbox/<Cognito sub>` (apps/api/src/realtime/inbox.ts); here
+ * a subscriber may only take the channel matching their own token. Only the
+ * API's IAM role can publish, so events pass through unchanged.
+ */
+const INBOX_HANDLERS = `
+import { util } from '@aws-appsync/utils'
+
+export function onSubscribe(ctx) {
+  if (ctx.info.channel.path !== '/inbox/' + ctx.identity.sub) util.unauthorized()
+}
+
+export function onPublish(ctx) {
+  return ctx.events
+}
+`
+
+/**
  * GraphQL API: one Lambda behind an HTTP API (reached through CloudFront at
  * `/graphql`), plus a deploy-time migration Trigger that must succeed before
- * the new API version is rolled out.
+ * the new API version is rolled out. Message delivery runs on AppSync Events:
+ * the app holds one WebSocket open, and the API publishes to it over HTTPS.
  */
 export class ApiStack extends Stack {
   readonly httpApi: apigwv2.HttpApi
+  readonly events: appsync.EventApi
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props)
@@ -52,6 +73,24 @@ export class ApiStack extends Stack {
       depsLockFilePath: fromRoot('pnpm-lock.yaml'),
       tracing: lambda.Tracing.ACTIVE,
     }
+
+    // Signed-in users connect and subscribe with their Cognito ID token; only IAM (the GraphQL Lambda) may publish.
+    const { IAM, USER_POOL } = appsync.AppSyncAuthorizationType
+    this.events = new appsync.EventApi(this, 'Realtime', {
+      apiName: `civic-${config.stage}-realtime`,
+      authorizationConfig: {
+        authProviders: [{ authorizationType: USER_POOL, cognitoConfig: { userPool } }, { authorizationType: IAM }],
+        connectionAuthModeTypes: [USER_POOL],
+        defaultPublishAuthModeTypes: [IAM],
+        defaultSubscribeAuthModeTypes: [USER_POOL],
+      },
+      logConfig: { fieldLogLevel: appsync.AppSyncFieldLogLevel.ERROR, retention: logs.RetentionDays.ONE_MONTH },
+    })
+    const inbox = this.events.addChannelNamespace('Inbox', {
+      channelNamespaceName: 'inbox',
+      code: appsync.Code.fromInline(INBOX_HANDLERS),
+      authorizationConfig: { publishAuthModeTypes: [IAM], subscribeAuthModeTypes: [USER_POOL] },
+    })
 
     const graphql = new nodejs.NodejsFunction(this, 'Graphql', {
       ...common,
@@ -68,10 +107,12 @@ export class ApiStack extends Stack {
         COGNITO_USER_POOL_ID: userPool.userPoolId,
         PERSISTED_ONLY: String(config.persistedOnly),
         GRAPHIQL: String(config.stage !== 'prod'),
+        REALTIME_HTTP_HOST: this.events.httpDns,
         NODE_OPTIONS: '--enable-source-maps',
       },
     })
     cluster.grantDataApiAccess(graphql)
+    inbox.grantPublish(graphql)
 
     const migrate = new nodejs.NodejsFunction(this, 'Migrate', {
       ...common,
@@ -108,6 +149,9 @@ export class ApiStack extends Stack {
     this.alarms(config, graphql)
 
     new CfnOutput(this, 'GraphqlEndpoint', { value: `${this.httpApi.apiEndpoint}/graphql` })
+    // Native builds need these as EXPO_PUBLIC_REALTIME_URL / EXPO_PUBLIC_REALTIME_HOST.
+    new CfnOutput(this, 'RealtimeUrl', { value: `wss://${this.events.realtimeDns}/event/realtime` })
+    new CfnOutput(this, 'RealtimeHost', { value: this.events.httpDns })
   }
 
   private alarms(config: StageConfig, graphql: lambda.IFunction) {

@@ -11,6 +11,7 @@
                         │ /* (pages, /_expo/loaders/*) ─────────► SSR Lambda (Function URL, OAC, stream) ─┼─► GraphQL (server prefetch)
                         └──────────────────────────────────────────────────────────────────────────────────┘
  Cognito user pool (managed login, PKCE) · CloudWatch alarms → SNS · X-Ray tracing
+ AppSync Events (WebSocket) ◄── app subscribes to its inbox channel; the GraphQL Lambda publishes (IAM), see ADR 0005
 ```
 
 CDK app: `infra/`. Stacks per stage: **Data** (isolated VPC, Aurora), **Auth** (Cognito), **Api** (GraphQL Lambda, HTTP API, migrations Trigger, alarms) and **Web** (S3, SSR Lambda, CloudFront, Cognito app client).

@@ -20,18 +20,22 @@ export function BottomNav() {
   const { openCompose } = useCompose()
   const [{ data }] = useQuery({ query: ViewerQuery, pause: status !== 'signed-in' })
   const items = navItems(status === 'signed-in' ? (data?.viewer?.handle ?? null) : null).filter((item) => item.phone)
+  // A conversation's composer owns the bottom of the screen; posting doesn't belong anywhere in Messages.
+  if (/^\/messages\/(?!new$)[^/]+$/.test(pathname)) return null
 
   return (
     <>
-      <Pressable
-        dataSet={{ shell: 'fab' }}
-        onPress={gate(() => openCompose(), 'Sign in to post an update')}
-        accessibilityRole="button"
-        accessibilityLabel="Post an update"
-        style={[styles.fab, fixed, { bottom: insets.bottom + 74, backgroundColor: c.primary }]}
-      >
-        <Icon name="plus" size={24} color={c.primary === brand.ink ? brand.lime : c.onPrimary} />
-      </Pressable>
+      {pathname.startsWith('/messages') ? null : (
+        <Pressable
+          dataSet={{ shell: 'fab' }}
+          onPress={gate(() => openCompose(), 'Sign in to post an update')}
+          accessibilityRole="button"
+          accessibilityLabel="Post an update"
+          style={[styles.fab, fixed, { bottom: insets.bottom + 74, backgroundColor: c.primary }]}
+        >
+          <Icon name="plus" size={24} color={c.primary === brand.ink ? brand.lime : c.onPrimary} />
+        </Pressable>
+      )}
       <View
         dataSet={{ shell: 'bottom' }}
         role="navigation"

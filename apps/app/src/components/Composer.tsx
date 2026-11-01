@@ -3,7 +3,6 @@ import {
   type AlertSeverity,
   canPublishAlerts,
   checkPrivacy,
-  hasBlockingFinding,
   POST_MAX_LENGTH,
   type PostKind,
   type UserRole,
@@ -28,8 +27,7 @@ interface Props {
 
 /**
  * Composer with an on-device privacy guard: personal data is flagged as you
- * type (no network call), and blocking findings disable publishing. The API
- * re-runs the same rules from @civic/core and is authoritative.
+ * type (no network call). It warns and never blocks; the author decides.
  */
 export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
   const c = useColors()
@@ -47,9 +45,9 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
   const viewer = viewerData?.viewer
   const official = viewer ? canPublishAlerts(viewer.role as UserRole, viewer.verified) : false
   const findings = useMemo(() => checkPrivacy(body), [body])
-  const blocked = hasBlockingFinding(findings)
+  const danger = findings.some((finding) => finding.level === 'danger')
   const remaining = POST_MAX_LENGTH - body.length
-  const canPost = body.trim().length > 0 && remaining >= 0 && !blocked && !fetching
+  const canPost = body.trim().length > 0 && remaining >= 0 && !fetching
 
   const toggleLocation = async () => {
     if (attachLocation) return setAttachLocation(false)
@@ -107,10 +105,10 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
         />
 
         {findings.length ? (
-          <View style={[styles.findings, { backgroundColor: blocked ? c.dangerTint : c.warningTint }]} accessibilityLiveRegion="polite">
+          <View style={[styles.findings, { backgroundColor: danger ? c.dangerTint : c.warningTint }]} accessibilityLiveRegion="polite">
             {findings.map((finding) => (
               <View key={`${finding.kind}-${finding.start}`} style={styles.finding}>
-                <Icon name={finding.level === 'block' ? 'lock' : 'shield'} size={15} color={finding.level === 'block' ? c.danger : c.warning} />
+                <Icon name={finding.level === 'danger' ? 'lock' : 'shield'} size={15} color={finding.level === 'danger' ? c.danger : c.warning} />
                 <Txt variant="small" style={{ flex: 1, color: c.text }}>
                   <Txt variant="smallStrong">“{body.slice(finding.start, finding.end)}”</Txt> — {finding.message}
                 </Txt>
@@ -150,7 +148,7 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
               <Icon name="location" size={19} color={c.accentText} />
             </Touchable>
             <View style={styles.privacy}>
-              <Icon name="shield" size={13} color={findings.length ? (blocked ? c.danger : c.warning) : c.textMuted} />
+              <Icon name="shield" size={13} color={findings.length ? (danger ? c.danger : c.warning) : c.textMuted} />
               <Txt variant="micro" color="textMuted" style={{ letterSpacing: 0.4 }}>
                 {findings.length ? `${findings.length} privacy ${findings.length === 1 ? 'issue' : 'issues'}` : attachLocation ? 'Location ≈1 km' : 'Privacy check on'}
               </Txt>

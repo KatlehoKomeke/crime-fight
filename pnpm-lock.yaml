@@ -41,6 +41,9 @@ importers:
       '@pothos/plugin-relay':
         specifier: ^4.8.1
         version: 4.8.1(@pothos/core@4.16.0(graphql@17.0.2))(graphql@17.0.2)
+      '@smithy/signature-v4':
+        specifier: ^5.7.4
+        version: 5.7.4
       aws-jwt-verify:
         specifier: ^5.2.1
         version: 5.2.1
@@ -69,6 +72,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
+      '@types/ws':
+        specifier: ^8.18.2
+        version: 8.18.2
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -78,6 +84,9 @@ importers:
       vitest:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0
 
   apps/app:
     dependencies:

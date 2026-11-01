@@ -8,6 +8,8 @@ export interface ApiEnv {
   persistedOnly: boolean
   graphiql: boolean
   corsOrigins: string[]
+  /** AppSync Events HTTP host for publishing inbox events; unset locally, where the dev server hosts them. */
+  realtimeHost?: string
 }
 
 export function readEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
@@ -24,5 +26,6 @@ export function readEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
     persistedOnly: env.PERSISTED_ONLY === 'true',
     graphiql: env.GRAPHIQL !== 'false' && stage !== 'prod',
     corsOrigins: (env.CORS_ORIGINS ?? 'http://localhost:8081').split(',').filter(Boolean),
+    realtimeHost: env.REALTIME_HTTP_HOST || undefined,
   }
 }

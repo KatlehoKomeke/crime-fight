@@ -50,6 +50,12 @@ const paths = {
     </>
   ),
   logout: <Path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11" />,
+  mail: (
+    <>
+      <Rect x="3" y="5" width="18" height="14" rx="2" />
+      <Path d="m3.5 6.5 8.5 6.5 8.5-6.5" />
+    </>
+  ),
   map: <Path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15" />,
   more: (
     <>

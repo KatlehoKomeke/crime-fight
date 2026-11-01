@@ -1,5 +1,6 @@
 export * from './format'
 export * from './geo'
+export * from './message'
 export * from './post'
 export * from './privacy'
 export * from './trust'

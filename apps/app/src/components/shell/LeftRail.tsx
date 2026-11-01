@@ -8,12 +8,13 @@ import { brand, fonts, layout, radius, useColors } from '@/theme'
 import { useCompose } from '../ComposeProvider'
 import { HoverLink } from '../HoverLink'
 import { Icon, type IconName } from '../Icon'
+import { UnreadBadge, useInboxState } from '../messages/inbox'
 import { useToast } from '../Toast'
 import { Avatar, Touchable, Txt } from '../ui'
 import { navItems } from './nav'
 
 /** Icons whose filled form reads as a blob; they stay outlined when active. */
-const OUTLINE_ONLY = new Set<IconName>(['search', 'radar', 'settings'])
+const OUTLINE_ONLY = new Set<IconName>(['search', 'radar', 'settings', 'mail'])
 
 export function LeftRail({ compact }: { compact: boolean }) {
   const c = useColors()
@@ -23,6 +24,7 @@ export function LeftRail({ compact }: { compact: boolean }) {
   const { status } = useAuth()
   const [{ data }] = useQuery({ query: ViewerQuery, pause: status !== 'signed-in' })
   const viewer = status === 'signed-in' ? data?.viewer : null
+  const { unread } = useInboxState()
   // `data-shell-label` hides labels below 1280px on web; native decides via `compact`.
   const labelProps = Platform.OS === 'web' ? { dataSet: { shellLabel: true } } : {}
 
@@ -59,6 +61,7 @@ export function LeftRail({ compact }: { compact: boolean }) {
                 <View>
                   <Icon name={item.icon} size={23} color={c.text} filled={active && !OUTLINE_ONLY.has(item.icon)} />
                   {item.key === 'alerts' ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.bg }]} /> : null}
+                  {item.key === 'messages' ? <UnreadBadge count={unread} /> : null}
                 </View>
                 {!compact ? (
                   <Txt {...labelProps} style={[styles.navLabel, { color: c.text, fontFamily: active ? fonts.bold : fonts.regular }]}>

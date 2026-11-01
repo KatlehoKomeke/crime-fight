@@ -1,5 +1,7 @@
+import type { InboxEventFieldsFragment } from '@civic/graphql'
 import type { Cache, CacheExchangeOpts } from '@urql/exchange-graphcache'
 import { relayPagination } from '@urql/exchange-graphcache/extras'
+import { ConversationQuery } from '@/graphql/documents'
 
 type Args = { id: string }
 
@@ -28,7 +30,44 @@ const toggle = (flag: string, counter: string | null, on: boolean) => (args: Arg
 const follow = (args: Args, cache: Cache, on: boolean) => {
   const ref = { __typename: 'User', id: args.id }
   const followerCount = nextCount(Number(cache.resolve(ref, 'followerCount') ?? 0), Boolean(cache.resolve(ref, 'viewerIsFollowing')), on)
-  return { __typename: 'User', id: args.id, viewerIsFollowing: on, followerCount }
+  // Unfollowing always ends messaging; following only enables it if they follow back, which the server answers.
+  const viewerCanMessage = on && Boolean(cache.resolve(ref, 'viewerCanMessage'))
+  return { __typename: 'User', id: args.id, viewerIsFollowing: on, followerCount, viewerCanMessage }
+}
+
+/**
+ * Applies an inbox event, whether it answers your own send or arrived over the
+ * realtime channel. Conversation and badge counts update by normalisation; this
+ * adds the new message to each cached first page of the thread, and refetches
+ * the inbox only when it doesn't have that conversation yet. The inbox screen
+ * sorts by latest activity itself, so existing rows need no reordering.
+ */
+const applyInboxEvent = (event: InboxEventFieldsFragment | null | undefined, cache: Cache) => {
+  const edge = event?.messageEdge
+  if (!event || !edge) return
+  const conversation = { __typename: 'Conversation', id: event.conversation.id }
+
+  for (const field of cache.inspectFields(conversation)) {
+    if (field.fieldName !== 'messages' || field.arguments?.after) continue
+    const variables = { ...(field.arguments as { first: number }), id: conversation.id }
+    cache.updateQuery({ query: ConversationQuery, variables }, (data) => {
+      const messages = data?.conversation?.messages
+      // Your own send arrives twice (the mutation and your channel); add it once.
+      if (!data?.conversation || !messages || messages.edges.some((e) => e.node.id === edge.node.id)) return data
+      return { ...data, conversation: { ...data.conversation, messages: { ...messages, edges: [edge, ...messages.edges] } } }
+    })
+  }
+
+  const key = cache.keyOfEntity(conversation)
+  const inInbox = cache
+    .inspectFields('Query')
+    .filter((field) => field.fieldName === 'conversations')
+    .some((field) => {
+      const connection = cache.resolve('Query', field.fieldKey) as string | null
+      const edges = (connection ? cache.resolve(connection, 'edges') : null) as string[] | null
+      return edges?.some((edgeKey) => cache.resolve(edgeKey, 'node') === key)
+    })
+  if (!inInbox) invalidateField(cache, 'Query', 'conversations')
 }
 
 /**
@@ -43,6 +82,11 @@ export const cacheConfig: CacheExchangeOpts = {
     PageInfo: () => null,
     PostConnection: () => null,
     PostEdge: () => null,
+    ConversationConnection: () => null,
+    ConversationEdge: () => null,
+    MessageConnection: () => null,
+    MessageEdge: () => null,
+    InboxEvent: () => null,
   },
   resolvers: {
     Query: {
@@ -50,8 +94,10 @@ export const cacheConfig: CacheExchangeOpts = {
       alerts: relayPagination(),
       search: relayPagination(),
       savedPosts: relayPagination(),
+      conversations: relayPagination(),
       post: (_parent, args) => ({ __typename: 'Post', id: args.id as string }),
     },
+    Conversation: { messages: relayPagination() },
     Post: { replies: relayPagination() },
     User: { posts: relayPagination() },
     Topic: { posts: relayPagination() },
@@ -78,6 +124,11 @@ export const cacheConfig: CacheExchangeOpts = {
       savePost: (_result, _args, cache) => invalidateField(cache, 'Query', 'savedPosts'),
       unsavePost: (_result, _args, cache) => invalidateField(cache, 'Query', 'savedPosts'),
       followUser: (_result, _args, cache) => invalidateField(cache, 'Query', 'trustedSources'),
+      sendMessage: (result, _args, cache) => applyInboxEvent(result.sendMessage as InboxEventFieldsFragment, cache),
+      markConversationRead: (result, _args, cache) => applyInboxEvent(result.markConversationRead as InboxEventFieldsFragment, cache),
+    },
+    Subscription: {
+      inbox: (result, _args, cache) => applyInboxEvent(result.inbox as InboxEventFieldsFragment, cache),
     },
   },
 }

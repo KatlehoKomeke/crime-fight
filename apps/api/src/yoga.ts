@@ -5,14 +5,16 @@ import { createYoga } from 'graphql-yoga'
 import { createAuthenticator } from './auth'
 import { type Context, createContextFactory } from './context'
 import type { ApiEnv } from './env'
+import { memoryHub, type Publisher } from './realtime/publisher'
 import { schema } from './schema'
 
 const documents: Record<string, string> = persistedDocuments
 
-export function createApi({ db, env }: { db: Database; env: ApiEnv }) {
+/** `realtime` delivers inbox events; without one they go to an in-process hub nobody listens to. */
+export function createApi({ db, env, realtime = memoryHub() }: { db: Database; env: ApiEnv; realtime?: Publisher }) {
   return createYoga<Record<string, unknown>, Context>({
     schema,
-    context: createContextFactory(db, createAuthenticator(env)),
+    context: createContextFactory(db, createAuthenticator(env), realtime),
     graphqlEndpoint: '/graphql',
     healthCheckEndpoint: '/health',
     logging: env.stage === 'test' ? false : 'info',

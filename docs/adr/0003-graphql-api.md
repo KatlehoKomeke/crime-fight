@@ -22,17 +22,17 @@
 | Pagination | Relay connections over a **keyset** on `(created_at, id)`; forward-only, max 50 per page | Stable under concurrent inserts; no OFFSET scans. Backward args are rejected rather than silently ignored. |
 | Errors | Typed codes (`UNAUTHENTICATED`, `FORBIDDEN`, `BAD_USER_INPUT`, `NOT_FOUND`); everything else masked in deployed stages | An expired token returns HTTP 401, so the client refreshes instead of silently browsing logged out. |
 | Auth | Cognito ID token verified with `aws-jwt-verify` (JWKS cached per container); a user row is provisioned on first sign-in | No extra post-confirmation Lambda. `AUTH_MODE=dev` (header `x-dev-user`) is refused in qa/prod. |
-| Domain rules | Shared `@civic/core` package: privacy guard, validation, trust badges | The composer flags personal data as you type (no network call); the API re-runs the same rules authoritatively. |
+| Domain rules | Shared `@civic/core` package: privacy guard, validation, trust badges | The composer flags personal data as you type (no network call); the API validates with the same schemas. |
 
 ## Trust and safety built into the API
 
 - **Trust badges are derived** from verified roles (`OFFICIAL_SOURCE`, `VERIFIED_UPDATE`, …) and cannot be typed into a post.
 - **Only verified officials/newsrooms** can publish `ALERT`/`ADVISORY` posts.
 - **Location coarsening:** member post locations are rounded to about 1 km server-side; only officials publish exact incident locations.
-- **Privacy guard:** Luhn-checked ID numbers and card numbers *block* publishing; phone numbers, emails and exact street addresses *warn*.
+- **Privacy guard:** warns and never blocks (since November 2026, [ADR 0005](0005-direct-messages.md)). Luhn-checked ID numbers and card numbers are flagged as dangerous; phone numbers, emails and exact street addresses as warnings.
 
 ## Follow-ups
 
-- Real-time alerts (GraphQL subscriptions over AppSync Events or API Gateway WebSockets).
+- Real-time alerts. Messaging now delivers subscriptions over AppSync Events ([ADR 0005](0005-direct-messages.md)); alerts can reuse it.
 - Edge caching of anonymous persisted GET queries (needs auth-aware cache keys).
 - Image uploads (S3 presigned POST + moderation) and a moderation queue for reports.

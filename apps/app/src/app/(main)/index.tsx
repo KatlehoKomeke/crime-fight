@@ -5,6 +5,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Composer } from '@/components/Composer'
 import { ContextBar } from '@/components/ContextBar'
+import { MessagesButton } from '@/components/messages/inbox'
 import { PostList } from '@/components/PostList'
 import { MobileBrand, Screen } from '@/components/Screen'
 import { useShellMode } from '@/components/shell/use-shell-mode'
@@ -111,6 +112,7 @@ function FeedHeader({ tab, onChange }: { tab: FeedKind; onChange: (tab: FeedKind
             )
           })}
         </View>
+        <MessagesButton />
       </View>
     </View>
   )

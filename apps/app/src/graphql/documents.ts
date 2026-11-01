@@ -132,6 +132,7 @@ export const ProfileQuery = graphql(`
       followerCount
       followingCount
       postCount
+      viewerCanMessage
       posts(first: $first, after: $after) {
         edges {
           cursor
@@ -361,6 +362,7 @@ export const FollowUser = graphql(`
       id
       viewerIsFollowing
       followerCount
+      viewerCanMessage
     }
   }
 `)
@@ -371,6 +373,159 @@ export const UnfollowUser = graphql(`
       id
       viewerIsFollowing
       followerCount
+      viewerCanMessage
+    }
+  }
+`)
+
+/* Direct messages. Only mutual follows can message each other. */
+
+export const MessageFields = graphql(`
+  fragment MessageFields on Message {
+    id
+    body
+    createdAt
+    isMine
+    sender {
+      id
+      handle
+      displayName
+      initials
+      avatarUrl
+    }
+  }
+`)
+
+export const ConversationRowFields = graphql(`
+  fragment ConversationRowFields on Conversation {
+    id
+    lastMessageAt
+    unreadCount
+    viewerCanSend
+    lastMessage {
+      id
+      body
+      createdAt
+      isMine
+    }
+    members {
+      id
+      handle
+      displayName
+      initials
+      avatarUrl
+      verified
+      role
+    }
+  }
+`)
+
+// The same shape whether it answers a mutation or arrives over the realtime
+// channel, so one cache updater handles both (lib/graphql/cache.ts).
+export const InboxEventFields = graphql(`
+  fragment InboxEventFields on InboxEvent {
+    conversation {
+      ...ConversationRowFields
+    }
+    messageEdge {
+      cursor
+      node {
+        ...MessageFields
+      }
+    }
+    viewer {
+      id
+      unreadConversationCount
+    }
+  }
+`)
+
+// Never sent to /graphql: the API runs this document for each recipient and
+// publishes the result to their inbox channel. Only ever add fields to it.
+export const InboxSubscription = graphql(`
+  subscription Inbox {
+    inbox {
+      ...InboxEventFields
+    }
+  }
+`)
+
+// Separate from Viewer so the shell's persisted query hash stays stable.
+export const InboxStateQuery = graphql(`
+  query InboxState {
+    viewer {
+      id
+      inboxChannel
+      unreadConversationCount
+    }
+  }
+`)
+
+export const ConversationsQuery = graphql(`
+  query Conversations($first: Int!, $after: String) {
+    conversations(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          ...ConversationRowFields
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`)
+
+export const ConversationQuery = graphql(`
+  query Conversation($id: ID!, $first: Int!, $after: String) {
+    conversation(id: $id) {
+      ...ConversationRowFields
+      messages(first: $first, after: $after) {
+        edges {
+          cursor
+          node {
+            ...MessageFields
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`)
+
+export const MessageContactsQuery = graphql(`
+  query MessageContacts($query: String) {
+    messageContacts(query: $query, first: 30) {
+      ...UserRowFields
+    }
+  }
+`)
+
+export const StartConversation = graphql(`
+  mutation StartConversation($userId: ID!) {
+    startConversation(userId: $userId) {
+      ...ConversationRowFields
+    }
+  }
+`)
+
+export const SendMessage = graphql(`
+  mutation SendMessage($conversationId: ID!, $body: String!) {
+    sendMessage(conversationId: $conversationId, body: $body) {
+      ...InboxEventFields
+    }
+  }
+`)
+
+export const MarkConversationRead = graphql(`
+  mutation MarkConversationRead($id: ID!) {
+    markConversationRead(id: $id) {
+      ...InboxEventFields
     }
   }
 `)

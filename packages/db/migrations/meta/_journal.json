@@ -29,6 +29,13 @@
       "when": 1793392472811,
       "tag": "0003_data_api_types",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793460720754,
+      "tag": "0004_messaging",
+      "breakpoints": true
     }
   ]
 }
