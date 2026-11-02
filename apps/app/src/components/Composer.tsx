@@ -73,9 +73,12 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
     setBody('')
     setAttachLocation(false)
     setKind('UPDATE')
-    toast(replyTo ? 'Reply posted' : 'Your update is live')
+    toast(replyTo ? 'Reply posted' : kind === 'UPDATE' ? 'Your report is live' : `Your ${kind.toLowerCase()} is live`)
     onPosted?.()
   }
+
+  // Posting is labelled "Report a crime", so say plainly where a report goes: not to SAPS. Officials publish alerts; they know.
+  const emergency = !replyTo && !official && (!compact || body.length > 0)
 
   return (
     <View style={[styles.wrap, compact && styles.compact]}>
@@ -95,14 +98,26 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
         <TextInput
           value={body}
           onChangeText={setBody}
-          placeholder={replyTo ? `Reply to @${replyTo.handle}` : compact ? 'Share a local update…' : 'What’s happening in your community?'}
+          placeholder={replyTo ? `Reply to @${replyTo.handle}` : compact ? 'Report a crime or share a local update…' : 'What happened, and where?'}
           placeholderTextColor={c.textMuted}
           multiline
           autoFocus={autoFocus}
-          accessibilityLabel={replyTo ? 'Reply text' : 'Update text'}
+          accessibilityLabel={replyTo ? 'Reply text' : 'Report text'}
           maxLength={POST_MAX_LENGTH + 50}
           style={[styles.input, compact ? styles.inputCompact : styles.inputLarge, { color: c.text }]}
         />
+
+        {emergency ? (
+          <View style={[styles.findings, { backgroundColor: c.surfaceAlt }]}>
+            <View style={styles.finding}>
+              <Icon name="siren" size={15} color={c.danger} />
+              <Txt variant="small" style={{ flex: 1, color: c.text }}>
+                <Txt variant="smallStrong">Not a police report. </Txt>
+                Your neighbourhood sees this, not SAPS. In an emergency, call 10111, or 112 from a mobile.
+              </Txt>
+            </View>
+          </View>
+        ) : null}
 
         {findings.length ? (
           <View style={[styles.findings, { backgroundColor: danger ? c.dangerTint : c.warningTint }]} accessibilityLiveRegion="polite">

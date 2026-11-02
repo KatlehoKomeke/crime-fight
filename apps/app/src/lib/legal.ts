@@ -6,5 +6,6 @@
 export const LEGAL = {
   operator: 'Katleho Komeke',
   email: 'katkomza@gmail.com',
-  updated: '1 November 2026',
+  /** When each document last changed. */
+  updated: { terms: '2 November 2026', privacy: '1 November 2026' },
 }

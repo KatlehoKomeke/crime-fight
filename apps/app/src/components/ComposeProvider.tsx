@@ -43,12 +43,12 @@ export function ComposeProvider({ children }: { children: ReactNode }) {
               accessibilityViewIsModal
               aria-modal
               role="dialog"
-              aria-label={state.replyTo ? 'Reply' : 'New update'}
+              aria-label={state.replyTo ? 'Reply' : 'Report a crime'}
               style={[styles.dialog, { backgroundColor: c.surface, paddingBottom: sheet ? insets.bottom : 0 }, sheet ? styles.fill : styles.floating]}
             >
               <View style={[styles.head, { borderBottomColor: c.line }]}>
                 <IconButton icon="close" label="Close" onPress={close} />
-                <Txt variant="label">{state.replyTo ? 'Reply' : 'New update'}</Txt>
+                <Txt variant="label">{state.replyTo ? 'Reply' : 'Report a crime'}</Txt>
                 <View style={{ width: 36 }} />
               </View>
               {state.open ? <Composer replyTo={state.replyTo} autoFocus onPosted={close} /> : null}

@@ -30,9 +30,9 @@ export function BottomNav() {
       {pathname.startsWith('/messages') ? null : (
         <Pressable
           dataSet={{ shell: 'fab' }}
-          onPress={gate(() => openCompose(), 'Sign in to post an update')}
+          onPress={gate(() => openCompose(), 'Sign in to report a crime')}
           accessibilityRole="button"
-          accessibilityLabel="Post an update"
+          accessibilityLabel="Report a crime"
           style={[styles.fab, fixed, { bottom: insets.bottom + 74, backgroundColor: c.primary }]}
         >
           <Icon name="plus" size={24} color={c.primary === brand.ink ? brand.lime : c.onPrimary} />

@@ -16,7 +16,7 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'Not an emergency service',
     blocks: [
-      'CIVIC/ONE is a community information service. Nobody monitors it around the clock, and it is not a way to report a crime or get help. In an emergency, call 10111 for the police, or 112 from a mobile phone. Report crimes to the South African Police Service.',
+      'CIVIC/ONE is a community information service. A crime you report here is shared with your neighbourhood so people can stay safe; it is not reported to the police. Nobody monitors CIVIC/ONE around the clock, and it is not a way to get help. In an emergency, call 10111 for the police, or 112 from a mobile phone. To open a case, report the crime to the South African Police Service as well.',
     ],
   },
   {
@@ -93,7 +93,7 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'Changes to these terms',
     blocks: [
-      `We may update these terms. If the changes are significant, we’ll tell you in the app before they take effect. If you keep using CIVIC/ONE after that, you accept the new terms. These terms were last updated on ${LEGAL.updated}.`,
+      `We may update these terms. If the changes are significant, we’ll tell you in the app before they take effect. If you keep using CIVIC/ONE after that, you accept the new terms. These terms were last updated on ${LEGAL.updated.terms}.`,
     ],
   },
   {
@@ -108,7 +108,7 @@ const SECTIONS: LegalSection[] = [
 
 export default function TermsScreen() {
   return (
-    <Screen title="Terms of use" header={<PageHeader title="Terms of use" subtitle={`Updated ${LEGAL.updated}`} back />}>
+    <Screen title="Terms of use" header={<PageHeader title="Terms of use" subtitle={`Updated ${LEGAL.updated.terms}`} back />}>
       <LegalDocument intro={INTRO} sections={SECTIONS} />
     </Screen>
   )

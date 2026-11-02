@@ -112,7 +112,7 @@ const SECTIONS: LegalSection[] = [
   },
   {
     heading: 'Changes to this policy',
-    blocks: [`If we make significant changes, we’ll tell you in the app before they take effect. This policy was last updated on ${LEGAL.updated}.`],
+    blocks: [`If we make significant changes, we’ll tell you in the app before they take effect. This policy was last updated on ${LEGAL.updated.privacy}.`],
   },
   {
     heading: 'Contact',
@@ -122,7 +122,7 @@ const SECTIONS: LegalSection[] = [
 
 export default function PrivacyScreen() {
   return (
-    <Screen title="Privacy policy" header={<PageHeader title="Privacy policy" subtitle={`Updated ${LEGAL.updated}`} back />}>
+    <Screen title="Privacy policy" header={<PageHeader title="Privacy policy" subtitle={`Updated ${LEGAL.updated.privacy}`} back />}>
       <LegalDocument intro={INTRO} sections={SECTIONS} />
     </Screen>
   )

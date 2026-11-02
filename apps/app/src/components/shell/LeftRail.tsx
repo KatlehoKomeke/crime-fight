@@ -79,15 +79,15 @@ export function LeftRail({ compact }: { compact: boolean }) {
 
         <Touchable
           dataSet={{ railItem: true }}
-          onPress={gate(() => openCompose(), 'Sign in to post an update')}
+          onPress={gate(() => openCompose(), 'Sign in to report a crime')}
           accessibilityRole="button"
-          accessibilityLabel="Post an update"
+          accessibilityLabel="Report a crime"
           style={[styles.post, { backgroundColor: c.primary }, compact && styles.postCompact]}
           hoverStyle={Platform.OS === 'web' ? { transform: [{ translateY: -2 }] } : undefined}
         >
           {!compact ? (
             <Txt {...labelProps} variant="bodyStrong" style={{ color: c.onPrimary }}>
-              Post an update
+              Report a crime
             </Txt>
           ) : null}
           <Icon name="send" size={20} color={c.primary === brand.ink ? brand.lime : c.onPrimary} />
