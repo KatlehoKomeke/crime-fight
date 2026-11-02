@@ -169,6 +169,76 @@ export const ProfileQuery = graphql(`
   }
 `)
 
+/*
+ * Page metadata (title, description, link preview card), fetched by each
+ * page's generateMetadata on the server. Separate from the screens' queries,
+ * so a card change never alters the operations an open tab sends.
+ */
+
+export const PreviewImageFields = graphql(`
+  fragment PreviewImageFields on PreviewImage {
+    path
+    alt
+  }
+`)
+
+export const ProfileMetadataQuery = graphql(`
+  query ProfileMetadata($handle: String!) {
+    user(handle: $handle) {
+      id
+      handle
+      displayName
+      bio
+      trustBadge
+      postCount
+      followerCount
+      previewImage {
+        ...PreviewImageFields
+      }
+    }
+  }
+`)
+
+export const PostMetadataQuery = graphql(`
+  query PostMetadata($id: ID!) {
+    post(id: $id) {
+      id
+      body
+      kind
+      severity
+      area
+      category
+      createdAt
+      author {
+        id
+        handle
+        displayName
+      }
+      topics {
+        id
+        title
+      }
+      previewImage {
+        ...PreviewImageFields
+      }
+    }
+  }
+`)
+
+export const TopicMetadataQuery = graphql(`
+  query TopicMetadata($slug: String!) {
+    topic(slug: $slug) {
+      id
+      slug
+      title
+      category
+      previewImage {
+        ...PreviewImageFields
+      }
+    }
+  }
+`)
+
 export const FollowersQuery = graphql(`
   query Followers($handle: String!, $first: Int!, $after: String) {
     user(handle: $handle) {

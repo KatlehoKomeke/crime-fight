@@ -1,4 +1,5 @@
 import { formatRelativeTimeLong } from '@civic/core'
+import type { PostMetadataQuery as PostMetadata } from '@civic/graphql'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import type { ImmutableRequest } from 'expo-router/server'
 import { View } from 'react-native'
@@ -8,7 +9,7 @@ import { PostCard } from '@/components/PostCard'
 import { PostList } from '@/components/PostList'
 import { PageHeader, Screen } from '@/components/Screen'
 import { Button, EmptyState, PostSkeleton, Txt } from '@/components/ui'
-import { PostQuery } from '@/graphql/documents'
+import { PostMetadataQuery, PostQuery } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
 import { useHydrate } from '@/lib/graphql/hydrate'
@@ -25,21 +26,28 @@ export function loader(_request: ImmutableRequest | undefined, params: Record<st
   return prefetch((fetch) => fetch(PostQuery, variables(param(params.id))))
 }
 
+/** Alerts and advisories say so up front, in the tab and in link previews. */
+const postTitle = (post: { kind: string; body: string; author: { displayName: string } }) =>
+  `${post.kind === 'ALERT' ? 'Alert · ' : post.kind === 'ADVISORY' ? 'Advisory · ' : ''}${post.author.displayName}: “${excerpt(post.body, 60)}”`
+
 export async function generateMetadata(_request: ImmutableRequest | undefined, params: Record<string, string | string[]>) {
   const id = param(params.id)
-  let post: { body: string; createdAt: string; author: { displayName: string; handle: string }; media: Array<{ url: string }> } | null | undefined
+  let post: PostMetadata['post'] | undefined
   await prefetch(async (fetch) => {
-    post = (await fetch(PostQuery, variables(id)))?.post
+    // The loader runs next and asks for PostQuery; starting it now means it doesn't wait.
+    const [metadata] = await Promise.all([fetch(PostMetadataQuery, { id }), fetch(PostQuery, variables(id))])
+    post = metadata?.post
   })
   if (!post) return pageMetadata({ title: 'Post not found', path: `/post/${id}`, noindex: true })
+  const author = profilePath(post.author.handle)
   return pageMetadata({
-    title: `${post.author.displayName}: “${excerpt(post.body, 60)}”`,
+    title: postTitle(post),
     description: excerpt(post.body),
     path: `/post/${id}`,
     type: 'article',
-    image: post.media[0]?.url,
-    publishedTime: post.createdAt,
-    extra: { authors: { name: post.author.displayName, url: `${serverConfig().siteUrl}${profilePath(post.author.handle)}` } },
+    image: post.previewImage,
+    article: { publishedTime: post.createdAt, authorPath: author, section: post.category, tags: post.topics.map((topic) => topic.title) },
+    extra: { authors: { name: post.author.displayName, url: `${serverConfig().siteUrl}${author}` } },
   })
 }
 
@@ -54,7 +62,7 @@ export default function PostScreen() {
   const fetching = replies.loading
 
   return (
-    <Screen title={post ? `${post.author.displayName}: “${excerpt(post.body, 60)}”` : 'Post'} header={<PageHeader title="Post" back />}>
+    <Screen title={post ? postTitle(post) : 'Post'} header={<PageHeader title="Post" back />}>
       {post ? (
         <JsonLd
           data={{

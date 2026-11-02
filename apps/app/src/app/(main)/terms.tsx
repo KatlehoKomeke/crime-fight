@@ -1,10 +1,11 @@
+import { PREVIEW_PAGES, previewPageImage } from '@civic/core'
 import { LegalDocument, type LegalSection } from '@/components/LegalDocument'
 import { PageHeader, Screen } from '@/components/Screen'
 import { LEGAL } from '@/lib/legal'
 import { pageMetadata } from '@/lib/seo'
 
 export function generateMetadata() {
-  return pageMetadata({ title: 'Terms of use', description: 'The rules for using CIVIC/ONE, and what you and we agree to.', path: '/terms' })
+  return pageMetadata({ title: 'Terms of use', description: PREVIEW_PAGES.terms.description, path: '/terms', image: previewPageImage('terms') })
 }
 
 const contact = `[${LEGAL.email}](mailto:${LEGAL.email})`

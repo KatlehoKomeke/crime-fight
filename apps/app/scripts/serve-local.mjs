@@ -1,6 +1,7 @@
 // Production-like local server for the exported web app: static assets from
-// dist/client, everything else through Expo's SSR handler (same code path as
-// the Lambda). Usage: pnpm --filter @civic/app serve
+// dist/client, link preview cards (/og/*) from the API like CloudFront sends
+// them, everything else through Expo's SSR handler (same code path as the
+// Lambda). Usage: pnpm --filter @civic/app serve
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
@@ -16,8 +17,23 @@ const port = Number(process.env.PORT ?? 8081)
 const types = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ttf': 'font/ttf', '.json': 'application/json', '.txt': 'text/plain', '.ico': 'image/x-icon', '.map': 'application/json' }
 
 const ssr = createRequestHandler({ build: join(root, 'dist/server') })
+const api = new URL(process.env.CIVIC_API_INTERNAL_URL ?? 'http://localhost:4000/graphql').origin
 
 createServer((req, res) => {
+  if (req.url?.startsWith('/og/')) {
+    // Redirects pass through, as CloudFront passes them to crawlers.
+    fetch(new URL(req.url, api), { method: req.method, redirect: 'manual' }).then(
+      async (card) => {
+        res.writeHead(card.status, Object.fromEntries(card.headers))
+        res.end(Buffer.from(await card.arrayBuffer()))
+      },
+      (error) => {
+        res.statusCode = 502
+        res.end(String(error))
+      },
+    )
+    return
+  }
   const path = normalize(decodeURIComponent((req.url ?? '/').split('?')[0]))
   const file = join(client, path)
   if (file.startsWith(client) && path !== '/' && existsSync(file) && statSync(file).isFile()) {

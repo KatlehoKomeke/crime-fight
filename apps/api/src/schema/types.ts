@@ -4,6 +4,7 @@ import type { Trend } from '../data/topics'
 import { NOTIFICATION_KINDS, type Notification } from '../data/notifications'
 import { filters, pagePosts, pageReplies } from '../data/posts'
 import { pageFollows } from '../data/users'
+import { type PreviewImage, postCard, previewImage, profileCard, topicCard } from '../og/cards'
 import { builder } from './builder'
 
 export const PostKind = builder.enumType('PostKind', { values: POST_KINDS })
@@ -30,6 +31,14 @@ export const TopicRef = builder.objectRef<Topic>('Topic')
 export const MediaRef = builder.objectRef<PostMedia>('Media')
 export const TrendRef = builder.objectRef<Trend>('Trend')
 export const NotificationRef = builder.objectRef<Notification>('Notification')
+
+export const PreviewImageRef = builder.objectRef<PreviewImage>('PreviewImage').implement({
+  description: 'A 1200×630 PNG card for link previews (Open Graph, Twitter) of the page about this object.',
+  fields: (t) => ({
+    path: t.exposeString('path', { description: 'Path on the site, e.g. /og/profile/alexm.png?v=1x2y3z. The version changes whenever the card does.' }),
+    alt: t.exposeString('alt', { description: 'What the card shows, for og:image:alt and twitter:image:alt.' }),
+  }),
+})
 
 export const PostConnection = builder.connectionObject({ type: PostRef, name: 'PostConnection' }, { name: 'PostEdge' })
 export const UserConnection = builder.connectionObject({ type: UserRef, name: 'UserConnection' }, { name: 'UserEdge' })
@@ -70,6 +79,7 @@ UserRef.implement({
       { type: UserRef, description: 'Who this account follows, most recent first.', resolve: (user, args, ctx) => pageFollows(ctx.db, user.id, 'following', args) },
       UserConnection,
     ),
+    previewImage: t.field({ type: PreviewImageRef, resolve: async (user, _, ctx) => previewImage(await profileCard(user, ctx.loaders)) }),
   }),
 })
 
@@ -119,6 +129,14 @@ PostRef.implement({
     replies: t.connection({ type: PostRef, resolve: (post, args, ctx) => pageReplies(ctx.db, post.id, args) }, PostConnection),
     media: t.field({ type: [MediaRef], resolve: (post, _, ctx) => ctx.loaders.media.load(post.id) }),
     topics: t.field({ type: [TopicRef], resolve: (post, _, ctx) => ctx.loaders.topics.load(post.id) }),
+    previewImage: t.field({
+      type: PreviewImageRef,
+      nullable: true,
+      resolve: async (post, _, ctx) => {
+        const card = await postCard(post, ctx.loaders)
+        return card ? previewImage(card) : null
+      },
+    }),
   }),
 })
 
@@ -129,6 +147,7 @@ TopicRef.implement({
     title: t.exposeString('title'),
     category: t.exposeString('category'),
     posts: t.connection({ type: PostRef, resolve: (topic, args, ctx) => pagePosts(ctx.db, filters.topic(ctx.db, topic.slug), args) }, PostConnection),
+    previewImage: t.field({ type: PreviewImageRef, resolve: async (topic, _, ctx) => previewImage(await topicCard(ctx.db, topic)) }),
   }),
 })
 

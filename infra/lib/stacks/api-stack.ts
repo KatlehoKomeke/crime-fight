@@ -141,14 +141,35 @@ export class ApiStack extends Stack {
       timeout: Duration.minutes(5),
     })
 
+    // Link preview cards (/og/*): their own function, so the fonts and the rasteriser never slow GraphQL cold starts.
+    const og = new nodejs.NodejsFunction(this, 'Og', {
+      ...common,
+      entry: fromRoot('apps/api/src/handlers/og.ts'),
+      memorySize: 1024,
+      timeout: Duration.seconds(15),
+      logGroup: new logs.LogGroup(this, 'OgLogs', { retention: logs.RetentionDays.ONE_MONTH }),
+      environment: { ...dbEnv, NODE_OPTIONS: '--enable-source-maps' },
+      bundling: {
+        ...bundling,
+        commandHooks: {
+          beforeBundling: () => [],
+          beforeInstall: () => [],
+          // The fonts and WebAssembly the cards are drawn with, read next to the handler (apps/api/src/og/render.ts).
+          afterBundling: (inputDir, outputDir) => [`node "${inputDir}/apps/api/scripts/copy-og-assets.mjs" "${outputDir}"`],
+        },
+      },
+    })
+    cluster.grantDataApiAccess(og)
+
     this.httpApi = new apigwv2.HttpApi(this, 'HttpApi', { apiName: `civic-${config.stage}` })
     const integration = new HttpLambdaIntegration('GraphqlIntegration', graphql)
     this.httpApi.addRoutes({ path: '/graphql', methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST], integration })
     this.httpApi.addRoutes({ path: '/health', methods: [apigwv2.HttpMethod.GET], integration })
+    this.httpApi.addRoutes({ path: '/og/{proxy+}', methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.HEAD], integration: new HttpLambdaIntegration('OgIntegration', og) })
     const stage = this.httpApi.defaultStage!.node.defaultChild as apigwv2.CfnStage
     stage.defaultRouteSettings = { throttlingRateLimit: config.api.throttleRate, throttlingBurstLimit: config.api.throttleBurst }
 
-    this.alarms(config, graphql)
+    this.alarms(config, graphql, og)
 
     new CfnOutput(this, 'GraphqlEndpoint', { value: `${this.httpApi.apiEndpoint}/graphql` })
     // Native builds need these as EXPO_PUBLIC_REALTIME_URL / EXPO_PUBLIC_REALTIME_HOST.
@@ -156,7 +177,7 @@ export class ApiStack extends Stack {
     new CfnOutput(this, 'RealtimeHost', { value: this.events.httpDns })
   }
 
-  private alarms(config: StageConfig, graphql: lambda.IFunction) {
+  private alarms(config: StageConfig, graphql: lambda.IFunction, og: lambda.IFunction) {
     const topic = new sns.Topic(this, 'Alarms', { displayName: `CIVIC/ONE ${config.stage} alarms` })
     if (config.alarmEmail) topic.addSubscription(new subscriptions.EmailSubscription(config.alarmEmail))
     const notify = new actions.SnsAction(topic)
@@ -166,6 +187,7 @@ export class ApiStack extends Stack {
       ['GraphqlErrors', graphql.metricErrors(window), 5],
       ['GraphqlThrottles', graphql.metricThrottles(window), 1],
       ['GraphqlSlow', graphql.metricDuration({ ...window, statistic: 'p99' }), 3000],
+      ['OgErrors', og.metricErrors(window), 5],
       ['Api5xx', this.httpApi.metricServerError(window), 10],
     ]
     for (const [name, metric, threshold] of definitions) {

@@ -1,4 +1,4 @@
-import { DEFAULT_CENTER, DEFAULT_RADIUS_KM, distanceKm, formatDistance, type GeoPoint } from '@civic/core'
+import { DEFAULT_CENTER, DEFAULT_RADIUS_KM, distanceKm, formatDistance, type GeoPoint, PREVIEW_PAGES, previewPageImage } from '@civic/core'
 import type { PostCardFieldsFragment } from '@civic/graphql'
 import { useMemo, useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
@@ -21,7 +21,7 @@ export function loader() {
 }
 
 export function generateMetadata() {
-  return pageMetadata({ title: 'Live radar', description: 'See verified updates and official alerts plotted by distance from you.', path: '/map' })
+  return pageMetadata({ title: 'Live radar', description: PREVIEW_PAGES.map.description, path: '/map', image: previewPageImage('map') })
 }
 
 const SIZE = 400

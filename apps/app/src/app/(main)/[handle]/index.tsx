@@ -1,4 +1,5 @@
-import { formatCount, TRUST_BADGE_LABEL, type TrustBadge } from '@civic/core'
+import { formatCount, type TrustBadge } from '@civic/core'
+import type { ProfileMetadataQuery as ProfileMetadata } from '@civic/graphql'
 import { Link, useLocalSearchParams, useRouter } from 'expo-router'
 import type { ImmutableRequest } from 'expo-router/server'
 import { useState } from 'react'
@@ -9,12 +10,13 @@ import { NotFound } from '@/components/NotFound'
 import { PostList } from '@/components/PostList'
 import { PageHeader, Screen } from '@/components/Screen'
 import { Avatar, Button, EmptyState, Skeleton, TrustChip, Txt, VerifiedBadge } from '@/components/ui'
-import { ProfileQuery } from '@/graphql/documents'
+import { ProfileMetadataQuery, ProfileQuery } from '@/graphql/documents'
 import { useHydrate } from '@/lib/graphql/hydrate'
 import { prefetch } from '@/lib/graphql/prefetch'
 import { usePaginatedQuery } from '@/lib/graphql/use-paginated'
 import { profileHandle, profilePath } from '@/lib/profile'
-import { excerpt, pageMetadata } from '@/lib/seo'
+import { profileMetadata } from '@/lib/profile-metadata'
+import { pageMetadata } from '@/lib/seo'
 import { PAGE_SIZE, param } from '@/lib/variables'
 import { brand, useColors } from '@/theme'
 
@@ -29,18 +31,13 @@ export async function generateMetadata(_request: ImmutableRequest | undefined, p
   const segment = param(params.handle)
   const handle = profileHandle(segment)
   if (!handle) return pageMetadata({ title: 'Not found', path: `/${encodeURIComponent(segment)}`, noindex: true })
-  let user: { handle: string; displayName: string; bio: string; trustBadge: string | null } | null | undefined
+  let user: ProfileMetadata['user'] | undefined
   await prefetch(async (fetch) => {
-    user = (await fetch(ProfileQuery, variables(handle)))?.user
+    // The loader runs next and asks for ProfileQuery; starting it now means it doesn't wait.
+    const [metadata] = await Promise.all([fetch(ProfileMetadataQuery, { handle }), fetch(ProfileQuery, variables(handle))])
+    user = metadata?.user
   })
-  if (!user) return pageMetadata({ title: 'Account not found', path: profilePath(handle), noindex: true })
-  const badge = user.trustBadge ? ` · ${TRUST_BADGE_LABEL[user.trustBadge as TrustBadge]}` : ''
-  return pageMetadata({
-    title: `${user.displayName} (@${user.handle})${badge}`,
-    description: excerpt(user.bio || `Updates from @${user.handle} on CIVIC/ONE.`),
-    path: profilePath(user.handle),
-    type: 'profile',
-  })
+  return user ? profileMetadata(user) : pageMetadata({ title: 'Account not found', path: profilePath(handle), noindex: true })
 }
 
 export default function ProfileRoute() {

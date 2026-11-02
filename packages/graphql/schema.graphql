@@ -193,6 +193,7 @@ type Post {
   likeCount: Int!
   location: GeoPoint
   media: [Media!]!
+  previewImage: PreviewImage
   replies(after: String, before: String, first: Int, last: Int): PostConnection!
   replyCount: Int!
   replyTo: Post
@@ -220,6 +221,19 @@ enum PostKind {
   ADVISORY
   ALERT
   UPDATE
+}
+
+"""
+A 1200×630 PNG card for link previews (Open Graph, Twitter) of the page about this object.
+"""
+type PreviewImage {
+  """What the card shows, for og:image:alt and twitter:image:alt."""
+  alt: String!
+
+  """
+  Path on the site, e.g. /og/profile/alexm.png?v=1x2y3z. The version changes whenever the card does.
+  """
+  path: String!
 }
 
 type Query {
@@ -278,6 +292,7 @@ type Topic {
   category: String!
   id: ID!
   posts(after: String, before: String, first: Int, last: Int): PostConnection!
+  previewImage: PreviewImage!
   slug: String!
   title: String!
 }
@@ -329,6 +344,7 @@ type User {
   isViewer: Boolean!
   postCount: Int!
   posts(after: String, before: String, first: Int, last: Int): PostConnection!
+  previewImage: PreviewImage!
   role: UserRole!
   trustBadge: TrustBadge
 

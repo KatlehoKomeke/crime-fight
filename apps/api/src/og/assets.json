@@ -1,0 +1,8 @@
+{
+  "resvg": "@resvg/resvg-wasm/index_bg.wasm",
+  "regular": "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
+  "medium": "@expo-google-fonts/dm-sans/500Medium/DMSans_500Medium.ttf",
+  "bold": "@expo-google-fonts/dm-sans/700Bold/DMSans_700Bold.ttf",
+  "displaySemibold": "@expo-google-fonts/space-grotesk/600SemiBold/SpaceGrotesk_600SemiBold.ttf",
+  "display": "@expo-google-fonts/space-grotesk/700Bold/SpaceGrotesk_700Bold.ttf"
+}

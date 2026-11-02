@@ -12,6 +12,7 @@ import { createAuthenticator, type Identity } from '../src/auth'
 import { deleteAccount } from '../src/data/account'
 import { resolveViewer } from '../src/data/users'
 import { readEnv } from '../src/env'
+import { serveOg } from '../src/og/serve'
 import { attachLocalRealtime } from '../src/realtime/local-server'
 import { memoryHub } from '../src/realtime/publisher'
 import type { SignIns } from '../src/sign-ins'
@@ -285,6 +286,56 @@ describe('follow lists', () => {
     const alex = await gql(LISTS, { handle: 'alexm', first: 10 })
     expect(handles(alex.data.user.following).sort()).toEqual(['civicone', 'metro_updates', 'victimsupport'])
     expect(handles(alex.data.user.followers)).toEqual([])
+  })
+})
+
+describe('link preview cards', () => {
+  const og = (path: string) => serveOg(handle.db, new URL(path, 'http://test'))
+  const CARDS = `{
+    user(handle: "victimsupport") { previewImage { path alt } }
+    topic(slug: "safewalk") { previewImage { path alt } }
+    feed(first: 1) { edges { node { previewImage { path alt } } } }
+  }`
+
+  beforeEach(() => {
+    // Post photos and avatars are fetched from their hosts; tests stay offline and draw without them.
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+    return () => vi.restoreAllMocks()
+  })
+
+  it('draws 1200×630 PNGs of profiles, posts, topics and pages, cached for good at their current version', async () => {
+    const { data } = await gql(CARDS)
+    const paths = [data.user.previewImage.path, data.topic.previewImage.path, data.feed.edges[0].node.previewImage.path, '/og/page/home.png']
+    for (const path of paths) {
+      const res = await og(path)
+      expect(res.status, path).toBe(200)
+      expect(res.headers.get('content-type')).toBe('image/png')
+      const png = new DataView(await res.arrayBuffer())
+      expect(png.getUint32(0)).toBe(0x89504e47)
+      expect([png.getUint32(16), png.getUint32(20)]).toEqual([1200, 630])
+    }
+    expect((await og(paths[0])).headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+    expect(data.user.previewImage.alt).toMatch(/^Victim Support \(@victimsupport\) on CIVIC\/ONE, support service: \d+ posts?, \d+ following, \d+ followers?\.$/)
+    expect(data.topic.previewImage.alt).toMatch(/^#Westside safe-walk on CIVIC\/ONE: \d+ posts in community\.$/)
+  })
+
+  it('gives a card a new version when what it shows changes, and redirects old ones', async () => {
+    const before = (await gql(CARDS)).data.user.previewImage.path as string
+    expect((await og(before.replace(/\?.*/, ''))).headers.get('location')).toBe(before)
+
+    await handle.db.update(schema.users).set({ displayName: 'Victim Support Network' }).where(eq(schema.users.handle, 'victimsupport'))
+    const after = (await gql(CARDS)).data.user.previewImage.path as string
+    expect(after).not.toBe(before)
+    const stale = await og(before)
+    expect(stale.status).toBe(302)
+    expect(stale.headers.get('location')).toBe(after)
+    expect(stale.headers.get('cache-control')).toBe('public, max-age=300')
+  })
+
+  it('only draws stored records, never text from the URL', async () => {
+    for (const path of ['/og/profile/nobody_here.png', '/og/post/not-a-post.png', '/og/topic/nothing.png', '/og/page/admin.png', '/og/alert/x.png', '/og/profile/%E0%A4%A.png']) {
+      expect((await og(path)).status, path).toBe(404)
+    }
   })
 })
 

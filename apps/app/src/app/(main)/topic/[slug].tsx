@@ -1,10 +1,11 @@
+import type { TopicMetadataQuery as TopicMetadata } from '@civic/graphql'
 import { useLocalSearchParams } from 'expo-router'
 import type { ImmutableRequest } from 'expo-router/server'
 import { View } from 'react-native'
 import { PostList } from '@/components/PostList'
 import { PageHeader, Screen } from '@/components/Screen'
 import { EmptyState } from '@/components/ui'
-import { TopicQuery } from '@/graphql/documents'
+import { TopicMetadataQuery, TopicQuery } from '@/graphql/documents'
 import { useHydrate } from '@/lib/graphql/hydrate'
 import { prefetch } from '@/lib/graphql/prefetch'
 import { usePaginatedQuery } from '@/lib/graphql/use-paginated'
@@ -19,15 +20,18 @@ export function loader(_request: ImmutableRequest | undefined, params: Record<st
 
 export async function generateMetadata(_request: ImmutableRequest | undefined, params: Record<string, string | string[]>) {
   const slug = param(params.slug)
-  let title: string | undefined
+  let topic: TopicMetadata['topic'] | undefined
   await prefetch(async (fetch) => {
-    title = (await fetch(TopicQuery, variables(slug)))?.topic?.title
+    // The loader runs next and asks for TopicQuery; starting it now means it doesn't wait.
+    const [metadata] = await Promise.all([fetch(TopicMetadataQuery, { slug: slug.toLowerCase() }), fetch(TopicQuery, variables(slug))])
+    topic = metadata?.topic
   })
   return pageMetadata({
-    title: title ? `#${title}` : `#${slug}`,
-    description: title ? `Verified local updates and community posts about ${title}.` : undefined,
-    path: `/topic/${slug}`,
-    noindex: !title,
+    title: topic ? `#${topic.title}` : `#${slug}`,
+    description: topic ? `Verified local updates and community posts about ${topic.title}, in ${topic.category.toLowerCase()}.` : undefined,
+    path: `/topic/${topic?.slug ?? slug}`,
+    image: topic?.previewImage,
+    noindex: !topic,
   })
 }
 

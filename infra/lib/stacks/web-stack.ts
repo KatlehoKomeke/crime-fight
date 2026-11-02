@@ -62,6 +62,7 @@ exports.handler = async () => {
  * One CloudFront distribution serves everything on one origin:
  *   /_expo/static/*, /assets/*, root files → S3 (immutable, hashed)
  *   /graphql                               → HTTP API (GraphQL Lambda)
+ *   /og/*                                  → HTTP API (Og Lambda), cached: see cardCache
  *   everything else                        → SSR Lambda (streaming Function URL)
  * Same-origin means no CORS for the browser and one TLS connection per visit.
  *
@@ -157,6 +158,22 @@ export class WebStack extends Stack {
       compress: true,
     }
 
+    const apiOrigin = new origins.HttpOrigin(apiDomain, { protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY })
+
+    // Link preview cards, unlike pages, are cached at the edge: they're read by
+    // link-preview crawlers, mostly in Europe and the US, and each version of a
+    // card is drawn once and then never changes (its URL changes instead). The
+    // Og function sets the TTLs: a year for a current version, minutes for redirects.
+    const cardCache = new cloudfront.CachePolicy(this, 'CardCache', {
+      comment: `CIVIC/ONE ${stage} link preview cards`,
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.allowList('v'),
+      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      minTtl: Duration.seconds(0),
+      defaultTtl: Duration.days(1),
+      maxTtl: Duration.days(365),
+    })
+
     const certificate = config.certificateArn ? acm.Certificate.fromCertificateArn(this, 'Certificate', config.certificateArn) : undefined
     const distribution = new cloudfront.Distribution(this, 'Cdn', {
       comment: `CIVIC/ONE ${stage}`,
@@ -178,13 +195,23 @@ export class WebStack extends Stack {
         '/_expo/static/*': staticAssets,
         '/assets/*': staticAssets,
         '/favicon.svg': staticAssets,
+        // PNG icons for link previews and home screens that can't use the SVG.
+        '/apple-touch-icon.png': staticAssets,
+        '/icon-192.png': staticAssets,
         '/robots.txt': staticAssets,
         '/graphql': {
-          origin: new origins.HttpOrigin(apiDomain, { protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY }),
+          origin: apiOrigin,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          responseHeadersPolicy: headers,
+        },
+        '/og/*': {
+          origin: apiOrigin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+          cachePolicy: cardCache,
           responseHeadersPolicy: headers,
         },
       },

@@ -33,6 +33,9 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0c0a" />
         <meta name="color-scheme" content="light dark" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        {/* PNGs for link previews and home screens that can't use SVG (iMessage, WhatsApp, Slack). */}
+        <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         {webFontPreloads.map((href) => (
           <link key={href} rel="preload" href={href} as="font" type="font/woff2" crossOrigin="" />
         ))}

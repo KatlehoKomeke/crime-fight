@@ -1,4 +1,4 @@
-import { formatCount } from '@civic/core'
+import { formatCount, PREVIEW_PAGES, previewPageImage } from '@civic/core'
 import { useLocalSearchParams } from 'expo-router'
 import type { ImmutableRequest } from 'expo-router/server'
 import { Platform, StyleSheet, View } from 'react-native'
@@ -27,7 +27,7 @@ export function loader(request: ImmutableRequest | undefined) {
 
 export function generateMetadata(request: ImmutableRequest | undefined) {
   const q = queryFrom(request)
-  return pageMetadata({ title: q ? `Search: ${q}` : 'Explore', description: 'Search verified local updates, topics and trusted sources.', path: '/explore', noindex: Boolean(q) })
+  return pageMetadata({ title: q ? `Search: ${q}` : 'Explore', description: PREVIEW_PAGES.explore.description, path: '/explore', image: previewPageImage('explore'), noindex: Boolean(q) })
 }
 
 export default function ExploreScreen() {
