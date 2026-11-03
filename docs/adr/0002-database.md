@@ -3,6 +3,7 @@
 - **Status:** Accepted (October 2026)
 - **Deciders:** Platform team
 - **Context:** You asked whether something beats "plain Postgres" for CIVIC/ONE.
+- **Update (November 2026):** Nearby, Live radar and post locations were removed (migration 0005 drops the columns). Nothing queries PostGIS any more; the extension is still installed by migration 0000.
 
 ## What the workload needs
 

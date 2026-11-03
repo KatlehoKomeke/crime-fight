@@ -59,14 +59,13 @@ async function gql<T = any>(query: string, variables: Record<string, unknown> = 
 }
 
 const FEED = /* GraphQL */ `
-  query Feed($kind: FeedKind, $first: Int, $after: String, $near: GeoInput, $radiusKm: Float) {
-    feed(kind: $kind, first: $first, after: $after, near: $near, radiusKm: $radiusKm) {
+  query Feed($kind: FeedKind, $first: Int, $after: String) {
+    feed(kind: $kind, first: $first, after: $after) {
       edges {
         node {
           id
           body
           kind
-          location { lat lng }
           author { handle verified }
           trustBadge
           media { url alt }
@@ -134,14 +133,6 @@ describe('feed', () => {
     expect(fraud.trustBadge).toBe('OFFICIAL_SOURCE')
   })
 
-  it('filters NEARBY by distance with PostGIS', async () => {
-    const harbor = { lat: -33.9036, lng: 18.4208 }
-    const { data } = await gql(FEED, { kind: 'NEARBY', near: harbor, radiusKm: 0.5, first: 50 })
-    const bodies = data.feed.edges.map((e: { node: { body: string } }) => e.node.body)
-    expect(bodies.length).toBeGreaterThan(0)
-    expect(bodies.every((b: string) => /Harbor|harbor|residents meeting|Late bus/.test(b))).toBe(true)
-  })
-
   it('requires sign-in for FOLLOWING and scopes it to followed accounts', async () => {
     const anon = await gql(FEED, { kind: 'FOLLOWING' })
     expect(anon.errors?.[0]?.extensions.code).toBe('UNAUTHENTICATED')
@@ -166,8 +157,8 @@ describe('feed', () => {
 
 describe('notifications', () => {
   const NOTIFICATIONS = /* GraphQL */ `
-    query Notifications($near: GeoInput, $radiusKm: Float, $first: Int, $after: String) {
-      notifications(near: $near, radiusKm: $radiusKm, first: $first, after: $after) {
+    query Notifications($first: Int, $after: String) {
+      notifications(first: $first, after: $after) {
         edges { node { id kind actor { handle } post { kind area body } } }
         pageInfo { hasNextPage endCursor }
       }
@@ -176,8 +167,8 @@ describe('notifications', () => {
   type Node = { id: string; kind: string; actor: { handle: string }; post: { kind: string; area: string; body: string } | null }
   const nodesOf = (result: GqlResult<{ notifications: { edges: Array<{ node: Node }> } }>) => result.data.notifications.edges.map((e) => e.node)
 
-  it('shows anonymous visitors official alerts and advisories only, including citywide ones', async () => {
-    const nodes = nodesOf(await gql(NOTIFICATIONS, { near: { lat: -33.9249, lng: 18.4241 }, radiusKm: 5, first: 50 }))
+  it('shows anonymous visitors official alerts and advisories only, from every area', async () => {
+    const nodes = nodesOf(await gql(NOTIFICATIONS, { first: 50 }))
     expect(nodes.length).toBeGreaterThan(0)
     expect(nodes.every((n) => n.kind === 'ALERT' && n.post?.kind !== 'UPDATE')).toBe(true)
     expect(nodes.map((n) => n.post?.area)).toContain('Citywide')
@@ -380,16 +371,15 @@ describe('mutations', () => {
     expect(official.data.createPost).toEqual({ kind: 'ALERT', severity: 'WARNING', trustBadge: 'OFFICIAL_SOURCE' })
   })
 
-  it('threads replies, links topics and coarsens member locations', async () => {
+  it('threads replies and links topics', async () => {
     const parentId = await firstPostId()
     const { data } = await gql(
       `mutation($input: CreatePostInput!) {
-        createPost(input: $input) { body location { lat lng } topics { slug title } replyTo { id replyCount } }
+        createPost(input: $input) { body topics { slug title } replyTo { id replyCount } }
       }`,
-      { input: { body: 'Platform 2 is clear now #CentralStation #NightTrain', replyToId: parentId, location: { lat: -33.92213, lng: 18.42317 } } },
+      { input: { body: 'Platform 2 is clear now #CentralStation #NightTrain', replyToId: parentId } },
       'thandi_m',
     )
-    expect(data.createPost.location).toEqual({ lat: -33.92, lng: 18.42 })
     expect(data.createPost.topics.map((t: { slug: string }) => t.slug).sort()).toEqual(['centralstation', 'nighttrain'])
     expect(data.createPost.topics.find((t: { slug: string }) => t.slug === 'nighttrain').title).toBe('NightTrain')
     expect(data.createPost.replyTo).toEqual({ id: parentId, replyCount: 27 })

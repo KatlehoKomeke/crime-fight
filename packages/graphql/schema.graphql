@@ -45,9 +45,6 @@ input CreatePostInput {
 
   """ALERT and ADVISORY require a verified official or newsroom account."""
   kind: PostKind
-
-  """Coarsened to ~1 km unless the author is a verified official."""
-  location: GeoInput
   replyToId: ID
   severity: AlertSeverity
 }
@@ -58,17 +55,6 @@ scalar DateTime
 enum FeedKind {
   FOLLOWING
   FOR_YOU
-  NEARBY
-}
-
-input GeoInput {
-  lat: Float!
-  lng: Float!
-}
-
-type GeoPoint {
-  lat: Float!
-  lng: Float!
 }
 
 """
@@ -191,7 +177,6 @@ type Post {
   id: ID!
   kind: PostKind!
   likeCount: Int!
-  location: GeoPoint
   media: [Media!]!
   previewImage: PreviewImage
   replies(after: String, before: String, first: Int, last: Int): PostConnection!
@@ -244,30 +229,20 @@ type Query {
 
   """Your conversations, most recent activity first."""
   conversations(after: String, before: String, first: Int, last: Int): ConversationConnection!
-  feed(
-    after: String
-    before: String
-    first: Int
-    kind: FeedKind = FOR_YOU
-    last: Int
-
-    """Defaults to the metro centre for NEARBY."""
-    near: GeoInput
-    radiusKm: Float
-  ): PostConnection!
+  feed(after: String, before: String, first: Int, kind: FeedKind = FOR_YOU, last: Int): PostConnection!
 
   """
-  When the newest of `notifications` with the same arguments happened, or null if there are none. Enough for an unread marker without loading the list.
+  When the newest of `notifications` happened, or null if there are none. Enough for an unread marker without loading the list.
   """
-  latestNotificationAt(near: GeoInput, radiusKm: Float): DateTime
+  latestNotificationAt: DateTime
 
   """People you can message: everyone you follow who follows you back."""
   messageContacts(first: Int, query: String): [User!]!
 
   """
-  Official alerts and advisories near a point (plus citywide ones) and, when signed in, replies, likes, reposts and follows from other people. Newest first.
+  Official alerts and advisories and, when signed in, replies, likes, reposts and follows from other people. Newest first.
   """
-  notifications(after: String, before: String, first: Int, last: Int, near: GeoInput, radiusKm: Float): NotificationConnection!
+  notifications(after: String, before: String, first: Int, last: Int): NotificationConnection!
   post(id: ID!): Post
   savedPosts(after: String, before: String, first: Int, last: Int): PostConnection!
   search(after: String, before: String, first: Int, last: Int, query: String!): PostConnection!

@@ -1,4 +1,3 @@
-import { DEFAULT_CENTER, DEFAULT_RADIUS_KM, type GeoPoint, MAX_RADIUS_KM } from '@civic/core'
 import { schema } from '@civic/db'
 import { eq } from 'drizzle-orm'
 import type { Context } from '../context'
@@ -8,18 +7,13 @@ import { apiError } from '../errors'
 import { trending } from '../data/topics'
 import { searchUsers, trustedSources } from '../data/users'
 import { builder } from './builder'
-import { FeedKind, GeoInput, NotificationConnection, NotificationRef, PostConnection, PostRef, TopicRef, TrendRef, UserRef } from './types'
+import { FeedKind, NotificationConnection, NotificationRef, PostConnection, PostRef, TopicRef, TrendRef, UserRef } from './types'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-const radius = (km: number | null | undefined) => Math.min(Math.max(km ?? DEFAULT_RADIUS_KM, 0.5), MAX_RADIUS_KM)
 const limit = (n: number | null | undefined, max: number) => Math.min(Math.max(n ?? 5, 1), max)
 
-const notificationScope = async (ctx: Context, { near, radiusKm }: { near?: GeoPoint | null; radiusKm?: number | null }) => ({
-  viewerId: (await ctx.viewer())?.id ?? null,
-  near: near ?? undefined,
-  radiusKm: near ? radius(radiusKm) : undefined,
-})
+const notificationScope = async (ctx: Context) => ({ viewerId: (await ctx.viewer())?.id ?? null })
 
 builder.queryType({
   fields: (t) => ({
@@ -33,15 +27,9 @@ builder.queryType({
     feed: t.connection(
       {
         type: PostRef,
-        args: {
-          kind: t.arg({ type: FeedKind, defaultValue: 'FOR_YOU' }),
-          near: t.arg({ type: GeoInput, description: 'Defaults to the metro centre for NEARBY.' }),
-          radiusKm: t.arg.float(),
-        },
+        args: { kind: t.arg({ type: FeedKind, defaultValue: 'FOR_YOU' }) },
         resolve: async (_root, args, ctx) => {
           switch (args.kind ?? 'FOR_YOU') {
-            case 'NEARBY':
-              return pagePosts(ctx.db, filters.nearby(args.near ?? DEFAULT_CENTER, radius(args.radiusKm)), args)
             case 'FOLLOWING': {
               const viewer = await ctx.requireViewer()
               return pagePosts(ctx.db, filters.following(viewer.id), args)
@@ -58,9 +46,8 @@ builder.queryType({
       {
         type: NotificationRef,
         description:
-          'Official alerts and advisories near a point (plus citywide ones) and, when signed in, replies, likes, reposts and follows from other people. Newest first.',
-        args: { near: t.arg({ type: GeoInput }), radiusKm: t.arg.float() },
-        resolve: async (_root, args, ctx) => pageNotifications(ctx.db, await notificationScope(ctx, args), args),
+          'Official alerts and advisories and, when signed in, replies, likes, reposts and follows from other people. Newest first.',
+        resolve: async (_root, args, ctx) => pageNotifications(ctx.db, await notificationScope(ctx), args),
       },
       NotificationConnection,
     ),
@@ -68,10 +55,9 @@ builder.queryType({
     latestNotificationAt: t.field({
       type: 'DateTime',
       nullable: true,
-      description: 'When the newest of `notifications` with the same arguments happened, or null if there are none. Enough for an unread marker without loading the list.',
-      args: { near: t.arg({ type: GeoInput }), radiusKm: t.arg.float() },
-      resolve: async (_root, args, ctx) => {
-        const { edges } = await pageNotifications(ctx.db, await notificationScope(ctx, args), { first: 1 })
+      description: 'When the newest of `notifications` happened, or null if there are none. Enough for an unread marker without loading the list.',
+      resolve: async (_root, _args, ctx) => {
+        const { edges } = await pageNotifications(ctx.db, await notificationScope(ctx), { first: 1 })
         return edges[0]?.node.createdAt ?? null
       },
     }),

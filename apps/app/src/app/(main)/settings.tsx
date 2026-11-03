@@ -8,7 +8,6 @@ import { useToast } from '@/components/Toast'
 import { Avatar, Button, Skeleton, Txt } from '@/components/ui'
 import { SettingsQuery, UpdateProfile } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
-import { useNear } from '@/lib/location'
 import { pageMetadata } from '@/lib/seo'
 import { fonts, radius, useColors } from '@/theme'
 
@@ -34,7 +33,6 @@ export default function SettingsScreen() {
     <Screen title="Settings" header={<PageHeader title="Settings" />}>
       <Body>
         {status === 'signed-in' ? <AccountSettings /> : status === 'signed-out' ? <SignedOut /> : <LoadingRows />}
-        <LocationSettings />
       </Body>
     </Screen>
   )
@@ -175,39 +173,6 @@ function ProfileForm({ viewer }: { viewer: { displayName: string; bio: string; i
         <Button label="Save changes" loading={fetching} disabled={!changed || !valid} onPress={() => void save()} />
       </View>
     </View>
-  )
-}
-
-function LocationSettings() {
-  const near = useNear()
-  const toast = useToast()
-  const [busy, setBusy] = useState(false)
-
-  const share = async () => {
-    setBusy(true)
-    try {
-      if (await near.locate()) toast('Using your approximate location')
-      else toast('Location permission was not granted')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Section title="Location">
-      <Row
-        label="Nearby and Live radar use"
-        value={near.source === 'device' ? 'Your approximate location' : 'The metro area (default)'}
-        hint="Your position is rounded to about 1 km on this device before it’s used, and it’s never shown on your posts."
-      />
-      <View style={styles.actions}>
-        {near.source === 'device' ? (
-          <Button label="Stop using my location" tone="outline" icon="close" onPress={() => void near.reset()} />
-        ) : (
-          <Button label="Use my location" tone="outline" icon="location" loading={busy} onPress={() => void share()} />
-        )}
-      </View>
-    </Section>
   )
 }
 

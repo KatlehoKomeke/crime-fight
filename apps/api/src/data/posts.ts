@@ -1,29 +1,20 @@
-import { type GeoPoint } from '@civic/core'
 import { type Database, type Post, schema } from '@civic/db'
 import { and, asc, desc, eq, inArray, isNull, ne, type SQL, sql } from 'drizzle-orm'
 import { type Connection, decodeCursor, type PageArgs, pageSize, toConnection } from './pagination'
 
 const { posts, postTopics, topics, saves, follows } = schema
 
-// `location` and `search` are generated columns outside the Drizzle model (see packages/db/src/schema.ts).
-const location = sql`"posts"."location"`
+// `search` is a generated column outside the Drizzle model (see packages/db/src/schema.ts).
 const searchVector = sql`"posts"."search"`
-
-const point = ({ lat, lng }: GeoPoint) => sql`ST_SetSRID(ST_MakePoint(${lng}::float8, ${lat}::float8), 4326)::geography`
-
-export const within = (center: GeoPoint, radiusKm: number) => sql`ST_DWithin(${location}, ${point(center)}, ${radiusKm * 1000}::float8)`
 
 export const filters = {
   topLevel: () => isNull(posts.replyToId),
-  nearby: (center: GeoPoint, radiusKm: number) => and(isNull(posts.replyToId), within(center, radiusKm)),
   following: (viewerId: string) =>
     and(
       isNull(posts.replyToId),
       sql`(${posts.authorId} = ${viewerId}::uuid or ${posts.authorId} in (select ${follows.followeeId} from ${follows} where ${follows.followerId} = ${viewerId}::uuid))`,
     ),
-  // Citywide alerts have no location and always apply.
-  alerts: (center?: GeoPoint, radiusKm?: number) =>
-    and(ne(posts.kind, 'UPDATE'), center && radiusKm ? sql`(${location} is null or ${within(center, radiusKm)})` : undefined),
+  alerts: () => ne(posts.kind, 'UPDATE'),
   byAuthor: (authorId: string) => and(eq(posts.authorId, authorId), isNull(posts.replyToId)),
   search: (query: string) => sql`${searchVector} @@ websearch_to_tsquery('english', ${query})`,
   topic: (db: Database, slug: string) =>

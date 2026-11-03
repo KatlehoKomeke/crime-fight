@@ -50,7 +50,7 @@ export function BottomNav() {
           return (
             <Link key={item.key} href={item.href as never} asChild>
               <Pressable accessibilityLabel={dot ? `${item.label} (new)` : item.label} accessibilityState={{ selected: active }} aria-current={active ? 'page' : undefined} style={styles.item}>
-                <Icon name={item.icon} size={24} color={active ? c.accentText : c.text} filled={active && item.icon !== 'search' && item.icon !== 'radar'} />
+                <Icon name={item.icon} size={24} color={active ? c.accentText : c.text} filled={active && item.icon !== 'search'} />
                 {dot ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.surface }]} /> : null}
               </Pressable>
             </Link>

@@ -24,10 +24,9 @@ const SECTIONS: LegalSection[] = [
       [
         'When you sign in: you sign in with Google or Apple, which send us your name, your email address, whether that address is verified, and an account identifier. We never see your password. If you use Apple’s Hide My Email, we receive the relay address instead.',
         'Your profile: your handle, display name and bio. Your Google or Apple name fills in your display name once; you can change it in Settings.',
-        'Your posts and replies, including the area, category and any location you choose to attach. Members’ locations are rounded to about 1 km before they are stored. Only verified officials publish exact incident locations.',
+        'Your posts and replies, including any area or category they name. We don’t ask for or store your device’s location.',
         'Your activity: who you follow, and the posts you like, repost or save.',
         'Messages you send to other members.',
-        'Your approximate location, only if you allow it on your device. We use it to show updates near you. It is sent with those requests and isn’t stored with your account.',
         'Technical information: our servers log each request (the time, the page or operation, the result and how long it took) so we can keep the service running and secure. Our hosting provider processes your IP address to deliver traffic and block abuse.',
       ],
       'We don’t use advertising or analytics trackers, and we don’t set cookies. To keep you signed in, your device stores a sign-in token: in secure storage on phones, and in your browser’s local storage on the web.',
@@ -38,7 +37,7 @@ const SECTIONS: LegalSection[] = [
     blocks: [
       [
         'To run your account and show your profile, posts and messages.',
-        'To show updates near you, and alerts from verified sources.',
+        'To show updates and alerts from verified sources.',
         'To keep CIVIC/ONE safe: preventing spam, abuse and impersonation, and investigating reports.',
         'To fix problems and improve the service.',
         'To meet our legal obligations.',

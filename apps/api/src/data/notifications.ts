@@ -1,4 +1,3 @@
-import { type GeoPoint } from '@civic/core'
 import { type Database, schema } from '@civic/db'
 import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm'
 import { alias, type AnyPgColumn, unionAll } from 'drizzle-orm/pg-core'
@@ -58,14 +57,14 @@ function activity(db: Database, viewerId: string) {
 }
 
 /**
- * Newest-first keyset page of official alerts near a point (plus citywide
- * ones) merged with the viewer's activity. Anonymous viewers get alerts only.
+ * Newest-first keyset page of official alerts and advisories merged with the
+ * viewer's activity. Anonymous viewers get alerts only.
  * Derived from the posts, likes, reposts and follows tables, so there is
  * nothing extra to write when someone interacts.
  */
 export async function pageNotifications(
   db: Database,
-  { viewerId, near, radiusKm }: { viewerId: string | null; near?: GeoPoint; radiusKm?: number },
+  { viewerId }: { viewerId: string | null },
   args: PageArgs,
 ): Promise<Connection<Notification>> {
   const limit = pageSize(args)
@@ -74,7 +73,7 @@ export async function pageNotifications(
   const alerts = db
     .select(columns('ALERT', [posts.id], posts.authorId, posts.id, posts.createdAt))
     .from(posts)
-    .where(and(isNull(posts.deletedAt), filters.alerts(near, radiusKm), viewerId ? ne(posts.authorId, viewerId) : undefined))
+    .where(and(isNull(posts.deletedAt), filters.alerts(), viewerId ? ne(posts.authorId, viewerId) : undefined))
   const all = viewerId ? unionAll(alerts, ...activity(db, viewerId)).as('n') : alerts.as('n')
 
   const rows = await db

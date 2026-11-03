@@ -16,7 +16,7 @@ import { Avatar, Touchable, Txt } from '../ui'
 import { navItems } from './nav'
 
 /** Icons whose filled form reads as a blob; they stay outlined when active. */
-const OUTLINE_ONLY = new Set<IconName>(['search', 'radar', 'settings', 'mail'])
+const OUTLINE_ONLY = new Set<IconName>(['search', 'settings', 'mail'])
 
 export function LeftRail({ compact }: { compact: boolean }) {
   const c = useColors()

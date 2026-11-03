@@ -1,4 +1,4 @@
-import { canPublishAlerts, coarsen, extractTopics } from '@civic/core'
+import { canPublishAlerts, extractTopics } from '@civic/core'
 import { createPostSchema, type CreatePostInput } from '@civic/core/schemas'
 import { type Database, type Post, schema, type User } from '@civic/db'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
@@ -22,9 +22,6 @@ export async function createPost(db: Database, author: User, raw: CreatePostInpu
   // blocked: the author decides (see @civic/core privacy).
   const official = canPublishAlerts(author.role, author.verifiedAt !== null)
   if (input.kind !== 'UPDATE' && !official) throw forbidden('Only verified officials and newsrooms can publish alerts')
-  // Officials report exact incident locations; everyone else is coarsened to ~1 km.
-  let at = input.location ?? null
-  if (at && !official) at = coarsen(at)
 
   return db.transaction(async (tx) => {
     if (input.replyToId) {
@@ -46,8 +43,6 @@ export async function createPost(db: Database, author: User, raw: CreatePostInpu
         area: input.area ?? null,
         category: input.category ?? null,
         body: input.body,
-        lat: at?.lat ?? null,
-        lng: at?.lng ?? null,
       })
       .returning()
 

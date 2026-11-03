@@ -40,7 +40,6 @@ builder.mutationType({
           severity: input.severity,
           area: input.area,
           category: input.category,
-          location: input.location,
           replyToId: input.replyToId == null ? null : String(input.replyToId),
         }),
     }),

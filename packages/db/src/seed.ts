@@ -42,8 +42,6 @@ export async function seed(db: Database): Promise<{ users: number; posts: number
         area: p.area ?? null,
         category: p.category ?? null,
         body: p.body,
-        lat: p.at?.lat ?? null,
-        lng: p.at?.lng ?? null,
         likeCount: p.counts?.likes ?? 0,
         repostCount: p.counts?.reposts ?? 0,
         replyCount: (p.counts?.replies ?? 0) + replies,

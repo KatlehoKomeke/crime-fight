@@ -95,7 +95,6 @@ const applyInboxEvent = (event: InboxEventFieldsFragment | null | undefined, cac
  */
 export const cacheConfig: CacheExchangeOpts = {
   keys: {
-    GeoPoint: () => null,
     Trend: () => null,
     PageInfo: () => null,
     PostConnection: () => null,

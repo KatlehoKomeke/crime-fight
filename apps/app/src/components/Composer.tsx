@@ -12,7 +12,6 @@ import { StyleSheet, TextInput, View } from 'react-native'
 import { useMutation, useQuery } from 'urql'
 import { CreatePost, ViewerQuery } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
-import { useNear } from '@/lib/location'
 import { fonts, radius, useColors } from '@/theme'
 import { Icon } from './Icon'
 import { useToast } from './Toast'
@@ -33,11 +32,9 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
   const c = useColors()
   const toast = useToast()
   const { status } = useAuth()
-  const near = useNear()
   const [{ data: viewerData }] = useQuery({ query: ViewerQuery, pause: status !== 'signed-in' })
   const [{ fetching }, createPost] = useMutation(CreatePost)
   const [body, setBody] = useState('')
-  const [attachLocation, setAttachLocation] = useState(false)
   const [kind, setKind] = useState<PostKind>('UPDATE')
   const [severity, setSeverity] = useState<AlertSeverity>('ADVISORY')
   const [serverError, setServerError] = useState<string | null>(null)
@@ -49,12 +46,6 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
   const remaining = POST_MAX_LENGTH - body.length
   const canPost = body.trim().length > 0 && remaining >= 0 && !fetching
 
-  const toggleLocation = async () => {
-    if (attachLocation) return setAttachLocation(false)
-    if (near.source === 'device' || (await near.locate())) setAttachLocation(true)
-    else toast('Location permission is off')
-  }
-
   const submit = async () => {
     setServerError(null)
     const result = await createPost({
@@ -63,7 +54,6 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
         replyToId: replyTo?.id,
         kind: replyTo ? 'UPDATE' : kind,
         severity: kind === 'UPDATE' || replyTo ? undefined : severity,
-        location: attachLocation ? near.point : undefined,
       },
     })
     if (result.error) {
@@ -71,7 +61,6 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
       return
     }
     setBody('')
-    setAttachLocation(false)
     setKind('UPDATE')
     toast(replyTo ? 'Reply posted' : kind === 'UPDATE' ? 'Your report is live' : `Your ${kind.toLowerCase()} is live`)
     onPosted?.()
@@ -151,23 +140,11 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
         ) : null}
 
         <View style={[styles.bar, { borderTopColor: c.lineSoft }]}>
-          <View style={styles.tools}>
-            <Touchable
-              onPress={() => void toggleLocation()}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: attachLocation }}
-              accessibilityLabel="Attach approximate location"
-              style={[styles.tool, attachLocation && { backgroundColor: c.accentTint }]}
-              hoverStyle={{ backgroundColor: c.accentTint }}
-            >
-              <Icon name="location" size={19} color={c.accentText} />
-            </Touchable>
-            <View style={styles.privacy}>
-              <Icon name="shield" size={13} color={findings.length ? (danger ? c.danger : c.warning) : c.textMuted} />
-              <Txt variant="micro" color="textMuted" style={{ letterSpacing: 0.4 }}>
-                {findings.length ? `${findings.length} privacy ${findings.length === 1 ? 'issue' : 'issues'}` : attachLocation ? 'Location ≈1 km' : 'Privacy check on'}
-              </Txt>
-            </View>
+          <View style={styles.privacy}>
+            <Icon name="shield" size={13} color={findings.length ? (danger ? c.danger : c.warning) : c.textMuted} />
+            <Txt variant="micro" color="textMuted" style={{ letterSpacing: 0.4 }}>
+              {findings.length ? `${findings.length} privacy ${findings.length === 1 ? 'issue' : 'issues'}` : 'Privacy check on'}
+            </Txt>
           </View>
           <View style={styles.submit}>
             {body.length > POST_MAX_LENGTH - 80 ? (
@@ -212,8 +189,6 @@ const styles = StyleSheet.create({
   findings: { marginTop: 8, padding: 12, borderRadius: radius.sm, gap: 8 },
   finding: { flexDirection: 'row', gap: 9, alignItems: 'flex-start' },
   bar: { marginTop: 10, paddingTop: 9, borderTopWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  tools: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  tool: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  privacy: { flexDirection: 'row', alignItems: 'center', gap: 5, marginLeft: 4 },
+  privacy: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   submit: { flexDirection: 'row', alignItems: 'center', gap: 12 },
 })

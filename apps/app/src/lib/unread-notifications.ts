@@ -1,10 +1,8 @@
-import { DEFAULT_RADIUS_KM } from '@civic/core'
 import { usePathname } from 'expo-router'
 import { useEffect, useSyncExternalStore } from 'react'
 import { useQuery } from 'urql'
 import { LatestNotificationQuery } from '@/graphql/documents'
 import { useAuth } from './auth'
-import { useNear } from './location'
 import { storage } from './storage'
 
 const KEY = 'civic.notifications-seen.v1'
@@ -59,12 +57,11 @@ async function markSeen(identity: string, createdAt: string) {
 /** Whether Notifications has something newer than this device last showed there. */
 export function useUnreadNotifications(): boolean {
   const { status, identity } = useAuth()
-  const near = useNear()
   const pathname = usePathname()
   const seenBy = useSyncExternalStore(subscribe, () => seen, () => undefined)
   // Until the session is read we don't know whose notifications to check.
   const pause = status === 'loading'
-  const [{ data }, reexecute] = useQuery({ query: LatestNotificationQuery, variables: { near: near.point, radiusKm: DEFAULT_RADIUS_KM }, pause })
+  const [{ data }, reexecute] = useQuery({ query: LatestNotificationQuery, pause })
 
   useEffect(() => {
     if (pause || Date.now() - lastCheck < RECHECK_MS) return

@@ -93,7 +93,6 @@ if (!app.requestSingleInstanceLock()) {
           submenu: [
             { label: 'Home', accelerator: 'CmdOrCtrl+1', click: () => void mainWindow?.loadURL(SITE_URL) },
             { label: 'Notifications', accelerator: 'CmdOrCtrl+2', click: () => void mainWindow?.loadURL(`${SITE_URL}/notifications`) },
-            { label: 'Live radar', accelerator: 'CmdOrCtrl+3', click: () => void mainWindow?.loadURL(`${SITE_URL}/map`) },
             { type: 'separator' },
             { role: 'reload' },
             { role: 'togglefullscreen' },

@@ -1,14 +1,14 @@
 import { ALERT_SEVERITIES, POST_KINDS, USER_ROLES } from '@civic/core'
 import { type SQL, sql } from 'drizzle-orm'
-import { type AnyPgColumn, check, doublePrecision, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, check, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 
 /*
- * Two generated columns are deliberately NOT declared here and live in
+ * One generated column is deliberately NOT declared here and lives in
  * migrations/0002_geo_search.sql instead:
- *   posts.location  geography(Point, 4326)  from (lng, lat), GiST-indexed for ST_DWithin
  *   posts.search    tsvector                from body, GIN-indexed for full-text search
- * Keeping them out of the Drizzle model means ordinary selects never ship
- * binary geography/tsvector payloads over the RDS Data API.
+ * Keeping it out of the Drizzle model means ordinary selects never ship
+ * tsvector payloads over the RDS Data API. (Post locations, and the
+ * geography column 0002 also added, were dropped in 0005.)
  */
 
 // Millisecond precision so cursors built from JS Dates round-trip exactly.
@@ -57,8 +57,6 @@ export const posts = pgTable(
     severity: text({ enum: ALERT_SEVERITIES }),
     area: text(),
     category: text(),
-    lat: doublePrecision(),
-    lng: doublePrecision(),
     replyCount: integer().notNull().default(0),
     likeCount: integer().notNull().default(0),
     repostCount: integer().notNull().default(0),

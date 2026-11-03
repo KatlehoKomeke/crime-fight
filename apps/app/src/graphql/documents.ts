@@ -23,10 +23,6 @@ export const PostCardFields = graphql(`
     viewerHasReposted
     viewerCanDelete
     trustBadge
-    location {
-      lat
-      lng
-    }
     author {
       id
       handle
@@ -69,8 +65,8 @@ export const UserRowFields = graphql(`
 `)
 
 export const FeedQuery = graphql(`
-  query Feed($kind: FeedKind!, $near: GeoInput, $radiusKm: Float, $first: Int!, $after: String) {
-    feed(kind: $kind, near: $near, radiusKm: $radiusKm, first: $first, after: $after) {
+  query Feed($kind: FeedKind!, $first: Int!, $after: String) {
+    feed(kind: $kind, first: $first, after: $after) {
       edges {
         cursor
         node {
@@ -86,8 +82,8 @@ export const FeedQuery = graphql(`
 `)
 
 export const NotificationsQuery = graphql(`
-  query Notifications($near: GeoInput, $radiusKm: Float, $first: Int!, $after: String) {
-    notifications(near: $near, radiusKm: $radiusKm, first: $first, after: $after) {
+  query Notifications($first: Int!, $after: String) {
+    notifications(first: $first, after: $after) {
       edges {
         cursor
         node {
@@ -117,8 +113,8 @@ export const NotificationsQuery = graphql(`
 `)
 
 export const LatestNotificationQuery = graphql(`
-  query LatestNotification($near: GeoInput, $radiusKm: Float) {
-    latestNotificationAt(near: $near, radiusKm: $radiusKm)
+  query LatestNotification {
+    latestNotificationAt
   }
 `)
 

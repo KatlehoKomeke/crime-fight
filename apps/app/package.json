@@ -31,7 +31,6 @@
     "expo-haptics": "~58.0.7",
     "expo-image": "~58.0.18",
     "expo-linking": "~58.0.15",
-    "expo-location": "~58.0.20",
     "expo-router": "~58.0.28",
     "expo-secure-store": "~58.0.2",
     "expo-server": "~58.0.6",
@@ -53,11 +52,11 @@
     "urql": "^5.0.4"
   },
   "devDependencies": {
-    "@types/react": "~19.3.0",
-    "esbuild": "^0.28.2",
-    "typescript": "~6.0.3",
     "@aws-sdk/client-ssm": "^3.1159.0",
     "@types/aws-lambda": "^8.10.164",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "@types/react": "~19.3.0",
+    "esbuild": "^0.28.2",
+    "typescript": "~6.0.3"
   }
 }

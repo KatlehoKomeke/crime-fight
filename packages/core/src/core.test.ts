@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkPrivacy, coarsen, distanceKm, extractTopics, formatCount, formatRelativeTime, initialsFor, segmentBody, trustBadgeFor } from './index'
+import { checkPrivacy, extractTopics, formatCount, formatRelativeTime, initialsFor, segmentBody, trustBadgeFor } from './index'
 import { createPostSchema } from './schemas'
 
 describe('privacy', () => {
@@ -77,12 +77,7 @@ describe('format', () => {
   })
 })
 
-describe('geo and trust', () => {
-  it('computes distances and coarsens locations', () => {
-    expect(distanceKm({ lat: -33.9249, lng: 18.4241 }, { lat: -33.9036, lng: 18.4208 })).toBeCloseTo(2.39, 1)
-    expect(coarsen({ lat: -33.92491, lng: 18.42417 })).toEqual({ lat: -33.92, lng: 18.42 })
-  })
-
+describe('trust', () => {
   it('derives badges only for verified accounts', () => {
     expect(trustBadgeFor('OFFICIAL', true)).toBe('OFFICIAL_SOURCE')
     expect(trustBadgeFor('OFFICIAL', false)).toBeNull()

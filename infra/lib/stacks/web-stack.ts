@@ -146,7 +146,7 @@ export class WebStack extends Stack {
         referrerPolicy: { referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN, override: true },
       },
       customHeadersBehavior: {
-        customHeaders: [{ header: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(self)', override: true }],
+        customHeaders: [{ header: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()', override: true }],
       },
     })
 
@@ -248,7 +248,7 @@ export class WebStack extends Stack {
         code: lambda.Code.fromInline(WARMER_SOURCE),
         memorySize: 128,
         timeout: Duration.seconds(30),
-        environment: { SITE_URL: siteUrl, WARM_PATHS: '/,/notifications,/explore,/map' },
+        environment: { SITE_URL: siteUrl, WARM_PATHS: '/,/notifications,/explore' },
         logGroup: new logs.LogGroup(this, 'WarmerLogs', { retention: logs.RetentionDays.ONE_WEEK }),
       })
       new events.Rule(this, 'WarmEveryMinute', {

@@ -2,6 +2,7 @@ import type { MiddlewareFunction } from 'expo-router/server'
 import type { MiddlewareSettings } from 'expo-server'
 
 const ALERTS = /^\/alerts\/?$/
+const RADAR = /^\/map\/?$/
 const OLD_PROFILE = /^\/u\/([^/]+)\/?$/
 
 /**
@@ -13,8 +14,8 @@ const OLD_PROFILE = /^\/u\/([^/]+)\/?$/
 const middleware: MiddlewareFunction = (request) => {
   const { pathname, search } = new URL(request.url)
   const profile = OLD_PROFILE.exec(pathname)
-  // Alerts became part of Notifications; profiles moved from /u/handle to /@handle.
-  const location = ALERTS.test(pathname) ? '/notifications' : profile ? `/@${profile[1]}` : null
+  // Alerts became part of Notifications; Live radar was retired; profiles moved from /u/handle to /@handle.
+  const location = ALERTS.test(pathname) ? '/notifications' : RADAR.test(pathname) ? '/' : profile ? `/@${profile[1]}` : null
   // Relative, so it stays on whichever host CloudFront was asked for.
   if (location) return new Response(null, { status: 301, headers: { Location: `${location}${search}` } })
 }
@@ -22,5 +23,5 @@ const middleware: MiddlewareFunction = (request) => {
 export default middleware
 
 export const unstable_settings: MiddlewareSettings = {
-  matcher: { methods: ['GET', 'HEAD'], patterns: [ALERTS, OLD_PROFILE] },
+  matcher: { methods: ['GET', 'HEAD'], patterns: [ALERTS, RADAR, OLD_PROFILE] },
 }

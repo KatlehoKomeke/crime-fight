@@ -25,7 +25,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: id.replace(/-/g, '_'),
-    permissions: ['ACCESS_COARSE_LOCATION'],
+    // Explicitly none: without a list, Expo requests a broad default set.
+    permissions: [],
   },
   // The SVG favicon is linked from src/app/+html.tsx and served from public/.
   web: {
@@ -37,12 +38,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-font',
     'expo-secure-store',
     'expo-web-browser',
-    [
-      'expo-location',
-      {
-        locationWhenInUsePermission: 'CIVIC/ONE uses your approximate location to show nearby updates and alerts. It is never posted without your say-so.',
-      },
-    ],
     ['expo-splash-screen', { backgroundColor: '#10110f', dark: { backgroundColor: '#0b0c0a' } }],
   ],
   extra: {

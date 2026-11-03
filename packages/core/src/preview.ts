@@ -6,7 +6,6 @@
 export const PREVIEW_PAGES = {
   home: { title: 'See clearly. Act safely.', description: 'Verified local safety updates, official alerts and support from the people keeping your neighbourhood informed.' },
   explore: { title: 'Explore', description: 'Search verified local updates, topics and the trusted sources behind them.' },
-  map: { title: 'Live radar', description: 'Verified updates and official alerts, plotted by distance from you.' },
   terms: { title: 'Terms of use', description: 'The rules for using CIVIC/ONE, and what you and we agree to.' },
   privacy: { title: 'Privacy policy', description: 'What CIVIC/ONE collects, why, who can see it and the choices you have.' },
 } as const

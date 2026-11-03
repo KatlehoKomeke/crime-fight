@@ -1,10 +1,8 @@
-import { DEFAULT_CENTER } from '@civic/core'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import { Platform, Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Composer } from '@/components/Composer'
-import { ContextBar } from '@/components/ContextBar'
 import { MessagesButton } from '@/components/messages/inbox'
 import { PostList } from '@/components/PostList'
 import { MobileBrand, Screen } from '@/components/Screen'
@@ -15,13 +13,12 @@ import { useAuth } from '@/lib/auth'
 import { useHydrate } from '@/lib/graphql/hydrate'
 import { prefetch } from '@/lib/graphql/prefetch'
 import { usePaginatedQuery } from '@/lib/graphql/use-paginated'
-import { useNear } from '@/lib/location'
 import { pageMetadata, SITE_NAME } from '@/lib/seo'
 import { type FeedKind, feedVariables } from '@/lib/variables'
 import { brand, fonts, sticky, useColors } from '@/theme'
 
 export function loader() {
-  return prefetch((fetch) => fetch(FeedQuery, feedVariables('FOR_YOU', DEFAULT_CENTER)))
+  return prefetch((fetch) => fetch(FeedQuery, feedVariables('FOR_YOU')))
 }
 
 export function generateMetadata() {
@@ -30,7 +27,6 @@ export function generateMetadata() {
 
 const TABS: Array<{ kind: FeedKind; label: string }> = [
   { kind: 'FOR_YOU', label: 'For you' },
-  { kind: 'NEARBY', label: 'Nearby' },
   { kind: 'FOLLOWING', label: 'Following' },
 ]
 
@@ -40,10 +36,9 @@ export default function HomeScreen() {
   const shell = useShellMode()
   const router = useRouter()
   const { status } = useAuth()
-  const near = useNear()
   const [tab, setTab] = useState<FeedKind>('FOR_YOU')
   const needsAuth = tab === 'FOLLOWING' && status !== 'signed-in'
-  const feed = usePaginatedQuery(FeedQuery, feedVariables(tab, near.point), (data) => data?.feed, { pause: needsAuth })
+  const feed = usePaginatedQuery(FeedQuery, feedVariables(tab), (data) => data?.feed, { pause: needsAuth })
 
   return (
     <Screen title={SITE_NAME} header={<FeedHeader tab={tab} onChange={setTab} />}>
@@ -60,22 +55,13 @@ export default function HomeScreen() {
           onEndReached={feed.loadMore}
           onRefresh={feed.refresh}
           header={
-            <View>
-              {status === 'signed-in' && shell !== 'phone' ? (
-                <View dataSet={{ hideMobile: true }} style={{ borderBottomWidth: 1, borderBottomColor: c.line }}>
-                  <Composer compact />
-                </View>
-              ) : null}
-              <ContextBar />
-            </View>
+            status === 'signed-in' && shell !== 'phone' ? (
+              <View dataSet={{ hideMobile: true }} style={{ borderBottomWidth: 1, borderBottomColor: c.line }}>
+                <Composer compact />
+              </View>
+            ) : null
           }
-          empty={
-            <EmptyState
-              icon={tab === 'NEARBY' ? 'location' : 'globe'}
-              title={tab === 'NEARBY' ? 'Quiet around here' : 'Nothing yet'}
-              body={tab === 'NEARBY' ? 'No updates within 15 km in the last while. That’s good news.' : 'Follow trusted sources to fill this feed.'}
-            />
-          }
+          empty={<EmptyState icon="globe" title="Nothing yet" body="Follow trusted sources to fill this feed." />}
         />
       )}
     </Screen>
@@ -103,10 +89,7 @@ function FeedHeader({ tab, onChange }: { tab: FeedKind; onChange: (tab: FeedKind
                 onPress={() => onChange(item.kind)}
                 style={({ hovered }) => [styles.tab, hovered && { backgroundColor: c.surfaceAlt }]}
               >
-                <View style={styles.tabLabel}>
-                  <Txt style={[styles.tabText, { color: active ? c.text : c.textMuted, fontFamily: active ? fonts.bold : fonts.semibold }]}>{item.label}</Txt>
-                  {item.kind === 'NEARBY' ? <View style={[styles.nearbyDot, { backgroundColor: brand.coral }]} /> : null}
-                </View>
+                <Txt style={[styles.tabText, { color: active ? c.text : c.textMuted, fontFamily: active ? fonts.bold : fonts.semibold }]}>{item.label}</Txt>
                 {active ? <View style={[styles.underline, { backgroundColor: brand.lime, borderTopColor: c.text }]} /> : null}
               </Pressable>
             )
@@ -124,8 +107,6 @@ const styles = StyleSheet.create({
   brand: { justifyContent: 'center', paddingLeft: 8 },
   tabs: { flex: 1, flexDirection: 'row' },
   tab: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  tabLabel: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   tabText: { fontSize: 14 },
-  nearbyDot: { width: 6, height: 6, borderRadius: 3 },
   underline: { position: 'absolute', bottom: 0, width: 54, height: 4, borderRadius: 3, borderTopWidth: 1 },
 })

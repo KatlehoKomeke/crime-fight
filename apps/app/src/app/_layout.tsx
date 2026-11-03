@@ -10,7 +10,6 @@ import { InboxListener } from '@/components/messages/inbox'
 import { ToastProvider } from '@/components/Toast'
 import { AuthProvider } from '@/lib/auth'
 import { GraphQLProvider } from '@/lib/graphql/provider'
-import { LocationProvider } from '@/lib/location'
 import { fontAssets } from '@/theme'
 
 if (Platform.OS !== 'web') void SplashScreen.preventAutoHideAsync()
@@ -31,14 +30,12 @@ export default function RootLayout() {
       <AuthProvider>
         <GraphQLProvider>
           <InboxListener />
-          <LocationProvider>
-            <ToastProvider>
-              <ComposeProvider>
-                {Platform.OS === 'web' ? <Slot /> : <Stack screenOptions={{ headerShown: false }} />}
-                <StatusBar style="auto" />
-              </ComposeProvider>
-            </ToastProvider>
-          </LocationProvider>
+          <ToastProvider>
+            <ComposeProvider>
+              {Platform.OS === 'web' ? <Slot /> : <Stack screenOptions={{ headerShown: false }} />}
+              <StatusBar style="auto" />
+            </ComposeProvider>
+          </ToastProvider>
         </GraphQLProvider>
       </AuthProvider>
     </GestureRoot>

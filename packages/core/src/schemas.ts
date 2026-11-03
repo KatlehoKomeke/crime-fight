@@ -9,11 +9,6 @@ import { ALERT_SEVERITIES, POST_KINDS, POST_MAX_LENGTH } from './post'
  * `@civic/core`. The API validates with these.
  */
 
-export const geoPointSchema = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-})
-
 export const createPostSchema = z
   .object({
     body: z
@@ -24,7 +19,6 @@ export const createPostSchema = z
     severity: z.enum(ALERT_SEVERITIES).nullish(),
     area: z.string().trim().max(60).nullish(),
     category: z.string().trim().max(40).nullish(),
-    location: geoPointSchema.nullish(),
     replyToId: z.uuid().nullish(),
   })
   .refine((input) => input.kind === 'UPDATE' || input.severity, {

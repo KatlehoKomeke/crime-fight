@@ -14,7 +14,6 @@ export function navItems(handle: string | null): NavItem[] {
   return [
     { key: 'home', label: 'Home', icon: 'home', href: '/', match: (p) => p === '/', phone: true },
     { key: 'explore', label: 'Explore', icon: 'search', href: '/explore', match: (p) => p.startsWith('/explore') || p.startsWith('/topic'), phone: true },
-    { key: 'map', label: 'Live radar', icon: 'radar', href: '/map', match: (p) => p.startsWith('/map'), phone: true },
     { key: 'notifications', label: 'Notifications', icon: 'bell', href: '/notifications', match: (p) => p.startsWith('/notifications'), phone: true },
     // Phones open Messages from the home header instead (MessagesButton): the tab bar is full.
     { key: 'messages', label: 'Messages', icon: 'mail', href: '/messages', match: (p) => p.startsWith('/messages') },

@@ -17,11 +17,10 @@ Why these choices: [ADR 0001 universal app](docs/adr/0001-universal-app.md) · [
 The prototype was one 289-line component with hard-coded posts. This version keeps its look (ink / paper / lime / coral, DM Sans + Space Grotesk, three-column layout) and makes it real:
 
 - **Server-rendered, crawlable pages:** real posts in the HTML, per-page titles and Open Graph, canonical URLs and JSON-LD. Dark mode and responsive layout are correct on first paint (CSS variables and media queries, no flash).
-- **Feeds that work:** For you · Nearby (PostGIS radius) · Following, infinite scroll, threaded replies, topics from `#hashtags`, people and post search, saved posts and profiles.
+- **Feeds that work:** For you · Following, infinite scroll, threaded replies, topics from `#hashtags`, people and post search, saved posts and profiles.
 - **Trust you can't fake:** "Verified update / Official source" badges come from verified roles, not post text. Only verified officials and newsrooms can publish alerts.
-- **Privacy by default:** the composer flags ID numbers, card numbers, phone numbers, emails and street addresses *as you type* (no network call). It warns and never blocks: the author decides. Member locations are coarsened to about 1 km.
+- **Privacy by default:** the composer flags ID numbers, card numbers, phone numbers, emails and street addresses *as you type* (no network call). It warns and never blocks: the author decides.
 - **Private messages:** instant one-to-one conversations between people who follow each other, delivered live over AppSync Events, with unread badges that stay in step across devices.
-- **Live radar:** nearby updates plotted by distance and severity (replaces the static "Live map" link).
 - **Instant interactions:** optimistic likes, reposts, saves and follows over a normalised cache, so one change updates every screen.
 - **Accessible:** semantic roles, labels, live-region toasts, reduced-motion support, visible focus rings, and body text at 15px instead of 8–9px.
 
@@ -105,7 +104,7 @@ Native builds also need `EXPO_PUBLIC_SSO_PROVIDERS=apple,google` in their EAS en
 
 | Area | State |
 | --- | --- |
-| Web SSR app, API, database, tests | ✅ Working and verified locally (SSR output, hydration, sign-in, posting, privacy guard, likes, radar) |
+| Web SSR app, API, database, tests | ✅ Working and verified locally (SSR output, hydration, sign-in, posting, privacy guard, likes) |
 | CDK stacks | ✅ Synthesize; Lambda bundles invoked locally against Postgres. **Not yet deployed to AWS.** |
 | GitHub Actions | ✅ Written; runs once the repo is pushed and the one-time setup is done |
 | iOS / Android binaries | ⚙️ Configured for EAS; not built yet (needs Expo + Apple/Google accounts) |

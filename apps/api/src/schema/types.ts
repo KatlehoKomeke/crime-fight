@@ -14,16 +14,8 @@ export const TrustBadge = builder.enumType('TrustBadge', {
   values: TRUST_BADGES,
   description: 'Derived from the author’s verified role; cannot be set by the author.',
 })
-export const FeedKind = builder.enumType('FeedKind', { values: ['FOR_YOU', 'NEARBY', 'FOLLOWING'] as const })
+export const FeedKind = builder.enumType('FeedKind', { values: ['FOR_YOU', 'FOLLOWING'] as const })
 export const NotificationKind = builder.enumType('NotificationKind', { values: NOTIFICATION_KINDS })
-
-export const GeoPoint = builder.objectRef<{ lat: number; lng: number }>('GeoPoint').implement({
-  fields: (t) => ({ lat: t.exposeFloat('lat'), lng: t.exposeFloat('lng') }),
-})
-
-export const GeoInput = builder.inputType('GeoInput', {
-  fields: (t) => ({ lat: t.float({ required: true }), lng: t.float({ required: true }) }),
-})
 
 export const UserRef = builder.objectRef<User>('User')
 export const PostRef = builder.objectRef<Post>('Post')
@@ -92,11 +84,6 @@ PostRef.implement({
     severity: t.field({ type: AlertSeverity, nullable: true, resolve: (post) => post.severity }),
     area: t.exposeString('area', { nullable: true }),
     category: t.exposeString('category', { nullable: true }),
-    location: t.field({
-      type: GeoPoint,
-      nullable: true,
-      resolve: (post) => (post.lat != null && post.lng != null ? { lat: post.lat, lng: post.lng } : null),
-    }),
     createdAt: t.field({ type: 'DateTime', resolve: (post) => post.createdAt }),
     replyCount: t.exposeInt('replyCount'),
     likeCount: t.exposeInt('likeCount'),
@@ -200,7 +187,6 @@ export const CreatePostInput = builder.inputType('CreatePostInput', {
     severity: t.field({ type: AlertSeverity }),
     area: t.string(),
     category: t.string(),
-    location: t.field({ type: GeoInput, description: 'Coarsened to ~1 km unless the author is a verified official.' }),
     replyToId: t.id(),
   }),
 })

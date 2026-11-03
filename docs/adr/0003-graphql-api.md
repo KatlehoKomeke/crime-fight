@@ -28,7 +28,7 @@
 
 - **Trust badges are derived** from verified roles (`OFFICIAL_SOURCE`, `VERIFIED_UPDATE`, …) and cannot be typed into a post.
 - **Only verified officials/newsrooms** can publish `ALERT`/`ADVISORY` posts.
-- **Location coarsening:** member post locations are rounded to about 1 km server-side; only officials publish exact incident locations.
+- **No post locations:** posts name an area as text only. Coordinates, and the ~1 km coarsening of members' ones, were removed in November 2026.
 - **Privacy guard:** warns and never blocks (since November 2026, [ADR 0005](0005-direct-messages.md)). Luhn-checked ID numbers and card numbers are flagged as dangerous; phone numbers, emails and exact street addresses as warnings.
 
 ## Follow-ups
