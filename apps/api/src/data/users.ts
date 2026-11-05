@@ -26,7 +26,7 @@ const sanitizeHandle = (raw: string) =>
  * ID tokens stay valid for up to an hour, and another signed-in tab must not
  * bring the account back.
  */
-export async function resolveViewer(db: Database, identity: Identity, signIns?: SignIns): Promise<User | null> {
+export async function resolveViewer(db: Database, identity: Identity, signIns?: SignIns, reservedHandles: ReadonlySet<string> = new Set()): Promise<User | null> {
   if (identity.kind === 'dev') {
     const [row] = await db.select().from(users).where(eq(users.handle, identity.handle.toLowerCase()))
     return row ?? null
@@ -45,7 +45,9 @@ export async function resolveViewer(db: Database, identity: Identity, signIns?: 
 
   const base = sanitizeHandle(identity.preferredUsername ?? identity.email?.split('@')[0] ?? 'neighbour')
   for (let attempt = 0; attempt < 5; attempt++) {
-    const handle = attempt === 0 ? base : `${base}${Math.floor(1000 + Math.random() * 9000)}`
+    // Admin handles are never handed out by sign-in: an email like admin@anywhere must not inherit the role.
+    const handle = attempt === 0 && !reservedHandles.has(base) ? base : `${base}${Math.floor(1000 + Math.random() * 9000)}`
+    if (reservedHandles.has(handle)) continue
     const [created] = await db
       .insert(users)
       .values({ authSub: identity.sub, handle, email, displayName: identity.name ?? identity.preferredUsername ?? handle })

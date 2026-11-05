@@ -1,5 +1,19 @@
-import { type AlertSeverity, initialsFor, type PostKind, PREVIEW_PAGES, type PreviewPage, previewPageImage, TRUST_BADGE_LABEL, trustBadgeFor } from '@civic/core'
-import { type Database, type Post, schema, type Topic, type User } from '@civic/db'
+import {
+  type AlertSeverity,
+  BOUNTY_LISTED_STATUSES,
+  BOUNTY_STATUS_LABEL,
+  type BountyKind,
+  type BountyStatus,
+  formatZar,
+  initialsFor,
+  type PostKind,
+  PREVIEW_PAGES,
+  type PreviewPage,
+  previewPageImage,
+  TRUST_BADGE_LABEL,
+  trustBadgeFor,
+} from '@civic/core'
+import { type Bounty, type Database, type Post, schema, type Topic, type User } from '@civic/db'
 import { and, count, eq, isNull } from 'drizzle-orm'
 import type { Loaders } from '../data/loaders'
 
@@ -58,7 +72,20 @@ export interface PageCard {
   page: PreviewPage
 }
 
-export type Card = ProfileCard | PostCard | TopicCard | PageCard
+export interface BountyCard {
+  kind: 'bounty'
+  id: string
+  bountyKind: BountyKind
+  status: BountyStatus
+  /** Empty for missing-person bounties: the card never carries the person's description. */
+  title: string
+  area: string | null
+  amountCents: number
+  poster: Person | null
+  hasCase: boolean
+}
+
+export type Card = ProfileCard | PostCard | TopicCard | PageCard | BountyCard
 
 export interface PreviewImage {
   /** Site path of the PNG, with a version that changes whenever the card does. */
@@ -118,6 +145,21 @@ export async function topicCard(db: Database, topic: Topic): Promise<TopicCard> 
   return { kind: 'topic', slug: topic.slug, title: topic.title, category: topic.category, posts: Number(row?.n ?? 0) }
 }
 
+export async function bountyCard(bounty: Bounty, loaders: Loaders): Promise<BountyCard> {
+  const poster = bounty.posterId ? await loaders.user.load(bounty.posterId) : null
+  return {
+    kind: 'bounty',
+    id: bounty.id,
+    bountyKind: bounty.kind,
+    status: bounty.status,
+    title: bounty.kind === 'MISSING_PERSON' ? '' : bounty.title,
+    area: bounty.kind === 'MISSING_PERSON' ? null : bounty.area,
+    amountCents: bounty.amountCents,
+    poster: poster ? person(poster) : null,
+    hasCase: bounty.sapsCaseNumber !== null,
+  }
+}
+
 /** 32-bit FNV-1a, base 36: a short, stable fingerprint of what a card shows. */
 function fingerprint(value: unknown): string {
   let hash = 0x811c9dc5
@@ -159,6 +201,10 @@ function describe(card: Card): { path: string; alt: string } {
       return { path: `/og/topic/${card.slug}.png`, alt: `#${card.title} on CIVIC/ONE: ${plural(card.posts, 'post')} in ${card.category.toLowerCase()}.` }
     case 'page':
       return previewPageImage(card.page)
+    case 'bounty': {
+      const what = card.bountyKind === 'MISSING_PERSON' ? `missing person${card.hasCase ? ', SAPS case open' : ''}` : quote(card.title, 120)
+      return { path: `/og/bounty/${card.id}.png`, alt: `${formatZar(card.amountCents)} bounty on CIVIC/ONE, ${BOUNTY_STATUS_LABEL[card.status].toLowerCase()}: ${what}` }
+    }
   }
 }
 
@@ -185,6 +231,10 @@ export async function loadCard(db: Database, loaders: Loaders, kind: string, key
     }
     case 'page':
       return Object.hasOwn(PREVIEW_PAGES, key) ? { kind: 'page', page: key as PreviewPage } : null
+    case 'bounty': {
+      const bounty = /^[0-9a-f-]{36}$/i.test(key) ? await loaders.bounty.load(key) : null
+      return bounty && BOUNTY_LISTED_STATUSES.includes(bounty.status) ? bountyCard(bounty, loaders) : null
+    }
     default:
       return null
   }

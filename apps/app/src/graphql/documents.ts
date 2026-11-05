@@ -47,6 +47,13 @@ export const PostCardFields = graphql(`
         handle
       }
     }
+    bounty {
+      id
+      amountCents
+      status
+      kind
+      expiresAt
+    }
   }
 `)
 
@@ -102,6 +109,15 @@ export const NotificationsQuery = graphql(`
           post {
             ...PostCardFields
           }
+          bountyEvent
+          note
+          bounty {
+            id
+            title
+            amountCents
+            status
+            kind
+          }
         }
       }
       pageInfo {
@@ -148,6 +164,7 @@ export const ProfileQuery = graphql(`
       followerCount
       followingCount
       postCount
+      bountyCount
       viewerCanMessage
       posts(first: $first, after: $after) {
         edges {
@@ -341,8 +358,10 @@ export const SavedQuery = graphql(`
   }
 `)
 
+// Prefetched with every page, so the shell knows at first paint whether bounties can be posted.
 export const ShellQuery = graphql(`
   query Shell {
+    paymentsStatus
     trends(first: 4) {
       postCount
       topic {
@@ -658,6 +677,575 @@ export const MarkConversationRead = graphql(`
   mutation MarkConversationRead($id: ID!) {
     markConversationRead(id: $id) {
       ...InboxEventFields
+    }
+  }
+`)
+
+/*
+ * Bounties: rewards paid in up front and held by CIVIC/ONE until the poster
+ * confirms a claim and an administrator verifies it (docs/adr/0006-bounties.md).
+ */
+
+export const BountyRowFields = graphql(`
+  fragment BountyRowFields on Bounty {
+    id
+    kind
+    status
+    title
+    area
+    amountCents
+    createdAt
+    fundedAt
+    expiresAt
+    closedAt
+    isExpired
+    claimCount
+    viewerIsPoster
+    poster {
+      id
+      handle
+      displayName
+      initials
+      avatarUrl
+      verified
+      role
+    }
+  }
+`)
+
+export const ClaimFields = graphql(`
+  fragment ClaimFields on BountyClaim {
+    id
+    status
+    body
+    links
+    posterNote
+    disputeNote
+    decisionReason
+    decisionNote
+    createdAt
+    confirmedAt
+    cooldownUntil
+    rejectedAt
+    decidedAt
+    viewerIsClaimant
+    claimant {
+      id
+      handle
+      displayName
+      initials
+      avatarUrl
+      verified
+      role
+      createdAt
+    }
+  }
+`)
+
+export const PayoutAccountFields = graphql(`
+  fragment PayoutAccountFields on PayoutAccount {
+    id
+    bankName
+    bankCode
+    accountName
+    accountLast4
+    status
+    createdAt
+    readyAt
+  }
+`)
+
+// Everything the detail page shows anyone. Claims, reports and the ledger come
+// back empty or null unless the viewer is the poster or an administrator.
+export const BountyDetailFields = graphql(`
+  fragment BountyDetailFields on Bounty {
+    ...BountyRowFields
+    body
+    currency
+    durationDays
+    sapsCaseNumber
+    relationship
+    frozenFromStatus
+    poster {
+      ...UserRowFields
+      viewerCanMessage
+    }
+    post {
+      id
+      body
+      createdAt
+      author {
+        id
+        handle
+        displayName
+      }
+    }
+    viewerClaim {
+      ...ClaimFields
+    }
+    winningClaim {
+      ...ClaimFields
+    }
+    claims {
+      ...ClaimFields
+      preflight {
+        claimantCreatedAfterBounty
+        claimantHasNoOtherActivity
+        priorPairings
+        payoutNameMismatch
+        payoutAccountAgeHours
+        cooldownEndsAt
+      }
+      payoutAccount {
+        ...PayoutAccountFields
+      }
+    }
+    events {
+      id
+      kind
+      claimId
+      byAdmin
+      note
+      createdAt
+      actor {
+        id
+        handle
+        displayName
+        initials
+        avatarUrl
+        verified
+        role
+      }
+    }
+    reports {
+      reason
+      note
+      createdAt
+      reporter {
+        id
+        handle
+        displayName
+      }
+    }
+    ledger {
+      id
+      type
+      status
+      amountCents
+      provider
+      reference
+      providerRef
+      note
+      createdAt
+      settledAt
+    }
+    latestPayout {
+      id
+      status
+      createdAt
+    }
+  }
+`)
+
+export const BountiesQuery = graphql(`
+  query Bounties($kind: BountyKind, $honoured: Boolean, $first: Int!, $after: String) {
+    bounties(kind: $kind, honoured: $honoured, first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          ...BountyRowFields
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`)
+
+export const BountyQuery = graphql(`
+  query Bounty($id: ID!) {
+    bounty(id: $id) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const BountyMetadataQuery = graphql(`
+  query BountyMetadata($id: ID!) {
+    bounty(id: $id) {
+      id
+      title
+      kind
+      status
+      amountCents
+      area
+      body
+      createdAt
+      poster {
+        id
+        handle
+        displayName
+      }
+      previewImage {
+        ...PreviewImageFields
+      }
+    }
+  }
+`)
+
+export const MyBountiesQuery = graphql(`
+  query MyBounties($first: Int!, $after: String) {
+    myBounties(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          ...BountyRowFields
+          claims {
+            id
+            status
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`)
+
+export const MyClaimsQuery = graphql(`
+  query MyClaims($first: Int!, $after: String) {
+    myClaims(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          ...ClaimFields
+          bounty {
+            ...BountyRowFields
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`)
+
+export const BountyQueueQuery = graphql(`
+  query BountyQueue($first: Int!, $after: String) {
+    bountyQueue(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          ...BountyRowFields
+          frozenFromStatus
+          claims {
+            id
+            status
+            createdAt
+            confirmedAt
+            cooldownUntil
+            claimant {
+              id
+              handle
+            }
+          }
+          reports {
+            reason
+            createdAt
+          }
+          latestPayout {
+            id
+            status
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`)
+
+export const ProfileBountiesQuery = graphql(`
+  query ProfileBounties($handle: String!, $first: Int!, $after: String) {
+    user(handle: $handle) {
+      id
+      handle
+      displayName
+      isViewer
+      bounties(first: $first, after: $after) {
+        edges {
+          cursor
+          node {
+            ...BountyRowFields
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`)
+
+// The right rail in the Bounties section: the latest rewards that were paid out.
+export const HonouredBountiesQuery = graphql(`
+  query HonouredBounties {
+    bounties(honoured: true, first: 3) {
+      edges {
+        node {
+          id
+          title
+          amountCents
+          closedAt
+        }
+      }
+    }
+  }
+`)
+
+// Separate from Shell so its persisted hash stays stable; cached once per session.
+export const PaymentsStatusQuery = graphql(`
+  query PaymentsStatus {
+    paymentsStatus
+  }
+`)
+
+export const BanksQuery = graphql(`
+  query Banks {
+    banks {
+      name
+      code
+    }
+  }
+`)
+
+// Separate from Viewer so the shell's persisted query hash stays stable.
+export const AdminStateQuery = graphql(`
+  query AdminState {
+    viewer {
+      id
+      viewerIsAdmin
+    }
+  }
+`)
+
+export const PayoutSettingsQuery = graphql(`
+  query PayoutSettings {
+    viewer {
+      id
+      displayName
+      heldBountyIds
+      payoutAccount {
+        ...PayoutAccountFields
+      }
+    }
+  }
+`)
+
+export const CreateBounty = graphql(`
+  mutation CreateBounty($input: CreateBountyInput!) {
+    createBounty(input: $input) {
+      checkoutUrl
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const RetryBountyCheckout = graphql(`
+  mutation RetryBountyCheckout($id: ID!) {
+    retryBountyCheckout(id: $id) {
+      checkoutUrl
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const ConfirmBountyPayment = graphql(`
+  mutation ConfirmBountyPayment($id: ID!) {
+    confirmBountyPayment(id: $id) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+// Local and test only; the API refuses it anywhere else.
+export const SandboxCompleteCheckout = graphql(`
+  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {
+    sandboxCompleteCheckout(id: $id, outcome: $outcome) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const CancelBounty = graphql(`
+  mutation CancelBounty($id: ID!) {
+    cancelBounty(id: $id) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const RequestBountyCancellation = graphql(`
+  mutation RequestBountyCancellation($id: ID!, $note: String!) {
+    requestBountyCancellation(id: $id, note: $note) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const SubmitClaim = graphql(`
+  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {
+    submitClaim(bountyId: $bountyId, input: $input) {
+      ...ClaimFields
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const WithdrawClaim = graphql(`
+  mutation WithdrawClaim($id: ID!) {
+    withdrawClaim(id: $id) {
+      ...ClaimFields
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const ConfirmClaim = graphql(`
+  mutation ConfirmClaim($id: ID!, $note: String) {
+    confirmClaim(id: $id, note: $note) {
+      ...ClaimFields
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const RejectClaim = graphql(`
+  mutation RejectClaim($id: ID!, $note: String!) {
+    rejectClaim(id: $id, note: $note) {
+      ...ClaimFields
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const DisputeClaim = graphql(`
+  mutation DisputeClaim($id: ID!, $note: String!) {
+    disputeClaim(id: $id, note: $note) {
+      ...ClaimFields
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const ReportBounty = graphql(`
+  mutation ReportBounty($id: ID!, $reason: BountyReportReason!, $note: String) {
+    reportBounty(id: $id, reason: $reason, note: $note) {
+      id
+    }
+  }
+`)
+
+export const SetPayoutAccount = graphql(`
+  mutation SetPayoutAccount($input: PayoutAccountInput!) {
+    setPayoutAccount(input: $input) {
+      ...PayoutAccountFields
+    }
+  }
+`)
+
+/* Administrators. */
+
+export const DecideClaim = graphql(`
+  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {
+    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {
+      ...ClaimFields
+      bounty {
+        ...BountyDetailFields
+      }
+    }
+  }
+`)
+
+export const RetryBountyPayout = graphql(`
+  mutation RetryBountyPayout($id: ID!) {
+    retryBountyPayout(id: $id) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const ApproveBounty = graphql(`
+  mutation ApproveBounty($id: ID!, $note: String!) {
+    approveBounty(id: $id, note: $note) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const DeclineBounty = graphql(`
+  mutation DeclineBounty($id: ID!, $note: String!) {
+    declineBounty(id: $id, note: $note) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const AdminCancelBounty = graphql(`
+  mutation AdminCancelBounty($id: ID!, $note: String!) {
+    adminCancelBounty(id: $id, note: $note) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const FreezeBounty = graphql(`
+  mutation FreezeBounty($id: ID!, $note: String!) {
+    freezeBounty(id: $id, note: $note) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const UnfreezeBounty = graphql(`
+  mutation UnfreezeBounty($id: ID!, $note: String!) {
+    unfreezeBounty(id: $id, note: $note) {
+      ...BountyDetailFields
+    }
+  }
+`)
+
+export const SweepBounties = graphql(`
+  mutation SweepBounties {
+    sweepBounties {
+      abandoned
+      expired
+      expiring
+      escalated
+      redriven
     }
   }
 `)

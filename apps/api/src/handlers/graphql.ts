@@ -1,7 +1,10 @@
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { createDb, dbConfigFromEnv } from '@civic/db'
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context as LambdaContext } from 'aws-lambda'
+import { sweep } from '../data/bounties'
 import { readEnv } from '../env'
+import { resolvePayments } from '../payments'
+import { handleWebhook } from '../payments/webhook'
 import { appSyncPublisher } from '../realtime/publisher'
 import { cognitoSignIns } from '../sign-ins'
 import { createApi } from '../yoga'
@@ -10,7 +13,9 @@ import { createApi } from '../yoga'
 const env = readEnv()
 const realtime = env.realtimeHost ? appSyncPublisher({ host: env.realtimeHost, region: process.env.AWS_REGION ?? 'af-south-1' }) : undefined
 const signIns = env.authMode === 'cognito' && env.cognitoUserPoolId ? cognitoSignIns(env.cognitoUserPoolId) : undefined
-const api = createApi({ db: createDb(dbConfigFromEnv()).db, env, realtime, signIns })
+const { db } = createDb(dbConfigFromEnv())
+// The Paystack key and the site URL come from Secrets Manager / SSM, once per cold start.
+const ready = resolvePayments(env).then((payments) => ({ payments, api: createApi({ db, env, realtime, signIns, payments }) }))
 
 /**
  * CloudFront passes the API straight through without caching or compressing it,
@@ -25,8 +30,27 @@ function encode(body: string, acceptEncoding = ''): { body: string; encoding?: '
   return { body }
 }
 
-/** API Gateway HTTP API (payload v2) → Fetch API → Yoga. */
-export async function handler(event: APIGatewayProxyEventV2, context: LambdaContext): Promise<APIGatewayProxyStructuredResultV2> {
+const WEBHOOK = /^\/payments\/([a-z]+)\/webhook$/
+
+/** API Gateway HTTP API (payload v2) → Fetch API → Yoga. Also the payment webhook, and the hourly bounty sweep from EventBridge. */
+export async function handler(event: APIGatewayProxyEventV2 | { source?: string }, context: LambdaContext): Promise<APIGatewayProxyStructuredResultV2> {
+  const { payments, api } = await ready
+
+  if (!('requestContext' in event)) {
+    const report = await sweep({ db, payments })
+    console.log('[bounties] sweep', report)
+    return { statusCode: 200, body: JSON.stringify(report) }
+  }
+
+  const webhook = WEBHOOK.exec(event.rawPath)
+  if (webhook) {
+    if (event.requestContext.http.method !== 'POST') return { statusCode: 405, body: 'Method not allowed' }
+    // The signature covers the raw bytes, so the body is verified exactly as it arrived.
+    const raw = Buffer.from(event.body ?? '', event.isBase64Encoded ? 'base64' : 'utf8')
+    const result = await handleWebhook({ db, payments }, webhook[1]!, raw, event.headers['x-paystack-signature'])
+    return { statusCode: result.status, headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' }, body: result.body }
+  }
+
   const query = event.rawQueryString ? `?${event.rawQueryString}` : ''
   const headers = new Headers()
   for (const [key, value] of Object.entries(event.headers ?? {})) if (value !== undefined) headers.set(key, value)

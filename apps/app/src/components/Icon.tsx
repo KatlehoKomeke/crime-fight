@@ -7,6 +7,13 @@ const paths = {
   arrowRight: <Path d="M5 12h14M13 6l6 6-6 6" />,
   bell: <Path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />,
   bookmark: <Path d="M6 3h12v18l-6-4-6 4z" />,
+  // A rosette: the reward on the bounty board.
+  bounty: (
+    <>
+      <Circle cx="12" cy="9" r="6" />
+      <Path d="M8.5 13.5 7 21l5-2.5 5 2.5-1.5-7.5" />
+    </>
+  ),
   check: <Path d="m7 12 3 3 7-7" />,
   close: <Path d="m6 6 12 12M18 6 6 18" />,
   comment: <Path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />,

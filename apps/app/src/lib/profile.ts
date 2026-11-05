@@ -1,6 +1,6 @@
-export type FollowList = 'followers' | 'following'
+export type FollowList = 'followers' | 'following' | 'bounties'
 
-/** Profiles live at `/@handle`, and their follow lists one level down. */
+/** Profiles live at `/@handle`, and their lists (followers, following, bounties) one level down. */
 export const profilePath = (handle: string, list?: FollowList) => (list ? `/@${handle}/${list}` : `/@${handle}`)
 
 /**

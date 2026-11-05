@@ -1,3 +1,4 @@
+export * from './bounty'
 export * from './format'
 export * from './message'
 export * from './post'

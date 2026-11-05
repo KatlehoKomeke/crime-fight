@@ -63,6 +63,7 @@ exports.handler = async () => {
  *   /_expo/static/*, /assets/*, root files → S3 (immutable, hashed)
  *   /graphql                               → HTTP API (GraphQL Lambda)
  *   /og/*                                  → HTTP API (Og Lambda), cached: see cardCache
+ *   /payments/*                            → HTTP API (GraphQL Lambda): payment webhooks
  *   everything else                        → SSR Lambda (streaming Function URL)
  * Same-origin means no CORS for the browser and one TLS connection per visit.
  *
@@ -212,6 +213,15 @@ export class WebStack extends Stack {
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
           cachePolicy: cardCache,
+          responseHeadersPolicy: headers,
+        },
+        // Payment provider webhooks (POST, signed bodies), passed straight through.
+        '/payments/*': {
+          origin: apiOrigin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
           responseHeadersPolicy: headers,
         },
       },

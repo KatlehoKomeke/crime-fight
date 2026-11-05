@@ -7,6 +7,7 @@ import { type Context, createContextFactory } from './context'
 import type { ApiEnv } from './env'
 import { memoryHub, type Publisher } from './realtime/publisher'
 import { schema } from './schema'
+import { disabledPayments, type Payments } from './payments'
 import { localSignIns, type SignIns } from './sign-ins'
 
 const documents: Record<string, string> = persistedDocuments
@@ -14,11 +15,24 @@ const documents: Record<string, string> = persistedDocuments
 /**
  * `realtime` delivers inbox events; without one they go to an in-process hub nobody listens to.
  * `signIns` is the identity provider's record of each sign-in (Cognito when deployed).
+ * `payments` holds bounty money; without one, bounties are read-only.
  */
-export function createApi({ db, env, realtime = memoryHub(), signIns = localSignIns }: { db: Database; env: ApiEnv; realtime?: Publisher; signIns?: SignIns }) {
+export function createApi({
+  db,
+  env,
+  realtime = memoryHub(),
+  signIns = localSignIns,
+  payments = disabledPayments(env.siteUrl),
+}: {
+  db: Database
+  env: ApiEnv
+  realtime?: Publisher
+  signIns?: SignIns
+  payments?: Payments
+}) {
   return createYoga<Record<string, unknown>, Context>({
     schema,
-    context: createContextFactory(db, createAuthenticator(env), realtime, signIns),
+    context: createContextFactory({ db, realtime, signIns, payments, adminHandles: env.adminHandles }, createAuthenticator(env)),
     graphqlEndpoint: '/graphql',
     healthCheckEndpoint: '/health',
     logging: env.stage === 'test' ? false : 'info',

@@ -1,7 +1,9 @@
 import { type Database, schema, type User } from '@civic/db'
 import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { apiError } from '../errors'
+import { heldForUser } from './bounties'
 
-const { users, posts, likes, reposts, conversations, conversationMembers } = schema
+const { users, posts, likes, reposts, conversations, conversationMembers, bounties, ledgerEntries, payoutAccounts, bountyClaims } = schema
 
 /**
  * Permanently deletes an account. Foreign keys cascade from the user row to
@@ -9,8 +11,17 @@ const { users, posts, likes, reposts, conversations, conversationMembers } = sch
  * memberships and messages. Before that, counters on other people's posts give
  * back what this account added, and its conversations are deleted whole: they
  * are one-to-one, so the other person has no one left to talk to there.
+ *
+ * Bounties are different: while CIVIC/ONE holds money for or owes money to the
+ * account, it can't go. Afterwards the money records stay (with the person
+ * set to null), because they are financial records.
  */
 export async function deleteAccount(db: Database, viewer: User): Promise<void> {
+  const held = await heldForUser(db, viewer.id)
+  if (held.length) {
+    throw apiError('BAD_USER_INPUT', 'CIVIC/ONE is holding money for a bounty you posted or claimed. Close or withdraw it first.', { bountyIds: held })
+  }
+
   await db.transaction(async (tx) => {
     await tx
       .update(posts)
@@ -36,6 +47,14 @@ export async function deleteAccount(db: Database, viewer: User): Promise<void> {
 
     const memberOf = tx.select({ id: conversationMembers.conversationId }).from(conversationMembers).where(eq(conversationMembers.userId, viewer.id))
     await tx.delete(conversations).where(inArray(conversations.id, memberOf))
+
+    // Bounties never paid for are abandoned; claims nobody answered are withdrawn; the bank account is freed for its owner.
+    const drafts = tx.select({ id: bounties.id }).from(bounties).where(and(eq(bounties.posterId, viewer.id), eq(bounties.status, 'PENDING_PAYMENT')))
+    await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Account deleted' }).where(and(inArray(ledgerEntries.bountyId, drafts), eq(ledgerEntries.status, 'PENDING')))
+    await tx.update(bounties).set({ status: 'ABANDONED', closedAt: new Date() }).where(and(eq(bounties.posterId, viewer.id), eq(bounties.status, 'PENDING_PAYMENT')))
+    await tx.update(bountyClaims).set({ status: 'WITHDRAWN' }).where(and(eq(bountyClaims.claimantId, viewer.id), inArray(bountyClaims.status, ['SUBMITTED', 'REJECTED_BY_POSTER'])))
+    await tx.update(payoutAccounts).set({ status: 'REPLACED', replacedAt: new Date() }).where(and(eq(payoutAccounts.userId, viewer.id), eq(payoutAccounts.status, 'ACTIVE')))
+
     await tx.delete(users).where(eq(users.id, viewer.id))
   })
 }

@@ -3,10 +3,10 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename } from 'node:path'
 import { initWasm, Resvg } from '@resvg/resvg-wasm'
-import { PREVIEW_IMAGE, PREVIEW_PAGES, type PreviewPage } from '@civic/core'
+import { BOUNTY_KIND_RULES, BOUNTY_STATUS_LABEL, formatZar, PREVIEW_IMAGE, PREVIEW_PAGES, type PreviewPage } from '@civic/core'
 import satori from 'satori'
 import assets from './assets.json' with { type: 'json' }
-import { type Card, cardText, KIND_LABEL, type Person, type PostCard, type ProfileCard, type TopicCard } from './cards'
+import { type BountyCard, type Card, cardText, KIND_LABEL, type Person, type PostCard, type ProfileCard, type TopicCard } from './cards'
 
 const { width: WIDTH, height: HEIGHT } = PREVIEW_IMAGE
 
@@ -281,6 +281,46 @@ function page(key: PreviewPage) {
   )
 }
 
+/** The amount is the card: it's what makes someone look twice. A missing-person card carries no description. */
+function bounty(card: BountyCard, posterPhoto: string | null) {
+  const rules = BOUNTY_KIND_RULES[card.bountyKind]
+  const missing = card.bountyKind === 'MISSING_PERSON'
+  const paid = card.status === 'PAID'
+  const headline = missing ? 'Missing person' : cardText(card.title)
+  const amount = formatZar(card.amountCents)
+  return box(
+    { width: WIDTH, height: HEIGHT, backgroundColor: C.paper },
+    stripe({ right: -40, width: 150, backgroundColor: paid ? C.ink : C.lime }),
+    stripe({ right: -190, width: 150, backgroundColor: paid ? C.lime : C.ink }),
+    box(
+      { flexDirection: 'column', justifyContent: 'space-between', width: 960, height: HEIGHT, padding: '60px 0 60px 72px' },
+      box(
+        { justifyContent: 'space-between', alignItems: 'center' },
+        lockup(false),
+        label(paid ? 'Bounty · honoured' : `Bounty · ${rules.short}`, paid ? { fg: C.white, bg: C.ink } : { fg: C.ink, bg: C.lime }),
+      ),
+      box(
+        { flexDirection: 'column' },
+        text({ fontFamily: DISPLAY, fontWeight: 700, fontSize: fit(amount.length, [[8, 128], [10, 112]], 96), lineHeight: 1, letterSpacing: -4, color: C.ink }, amount),
+        text(
+          { fontFamily: DISPLAY, fontWeight: 600, fontSize: fit(headline.length, [[40, 44], [70, 38]], 32), lineHeight: 1.15, letterSpacing: -0.8, color: C.inkSoft, lineClamp: 2, marginTop: 22, maxWidth: 880 },
+          headline,
+        ),
+        missing ? text({ fontFamily: SANS, fontWeight: 500, fontSize: 26, color: C.muted, marginTop: 14 }, card.hasCase ? 'SAPS case open · sightings go to 10111, never here' : 'Sightings go to SAPS on 10111, never here') : null,
+      ),
+      box(
+        { alignItems: 'center', gap: 16 },
+        card.poster ? avatar(card.poster, 56, posterPhoto) : null,
+        box(
+          { flexDirection: 'column', gap: 4 },
+          text({ fontFamily: SANS, fontWeight: 700, fontSize: 26, color: C.ink }, card.poster ? card.poster.name : 'A former member', card.poster?.verified ? verified(24, { marginLeft: 8 }) : null),
+          text({ fontFamily: SANS, fontWeight: 400, fontSize: 22, color: C.muted }, [card.area, paid ? 'Reward paid out' : BOUNTY_STATUS_LABEL[card.status], 'Held by CIVIC/ONE until verified'].filter(Boolean).join('  ·  ')),
+        ),
+      ),
+    ),
+  )
+}
+
 /**
  * A remote image as a data URI, or null if it's slow, large or not an image.
  * Only https, and only for URLs already stored with a user or post.
@@ -310,6 +350,8 @@ async function layout(card: Card): Promise<El> {
       return topic(card)
     case 'page':
       return page(card.page)
+    case 'bounty':
+      return bounty(card, await fetchImage(card.poster?.avatarUrl ?? null))
   }
 }
 

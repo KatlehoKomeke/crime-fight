@@ -1,9 +1,9 @@
-import { type Database, type Post, type PostMedia, schema, type Topic, type User } from '@civic/db'
+import { type Bounty, type Database, type Post, type PostMedia, schema, type Topic, type User } from '@civic/db'
 import DataLoader from 'dataloader'
-import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { createMessagingLoaders } from './messaging'
 
-const { users, posts, postMedia, postTopics, topics, likes, saves, reposts, follows } = schema
+const { users, posts, postMedia, postTopics, topics, likes, saves, reposts, follows, bounties, bountyClaims } = schema
 
 function byId<K, V>(keys: readonly K[], rows: V[], keyOf: (row: V) => K): Array<V | null> {
   const map = new Map(rows.map((row) => [keyOf(row), row]))
@@ -64,6 +64,27 @@ export function createLoaders(db: Database, viewerId: () => Promise<string | nul
     liked: viewerEdge(likes),
     saved: viewerEdge(saves),
     reposted: viewerEdge(reposts),
+    bounty: new DataLoader<string, Bounty | null>(async (ids) => byId(ids, await db.select().from(bounties).where(inArray(bounties.id, [...ids])), (b) => b.id)),
+    /** The bounty raised from a post, while it's on the board. */
+    bountyByPost: new DataLoader<string, Bounty | null>(async (postIds) => {
+      const rows = await db
+        .select()
+        .from(bounties)
+        .where(and(inArray(bounties.postId, [...postIds]), inArray(bounties.status, ['OPEN', 'AWAITING_VERIFICATION', 'RELEASING', 'PAID'])))
+        .orderBy(desc(bounties.createdAt))
+      return postIds.map((id) => rows.find((row) => row.postId === id) ?? null)
+    }),
+    /** Claims on a bounty that count: everything but withdrawn ones. */
+    claimCount: new DataLoader<string, number>(async (ids) =>
+      counts(
+        ids,
+        await db
+          .select({ key: bountyClaims.bountyId, n: count() })
+          .from(bountyClaims)
+          .where(and(inArray(bountyClaims.bountyId, [...ids]), ne(bountyClaims.status, 'WITHDRAWN')))
+          .groupBy(bountyClaims.bountyId),
+      ),
+    ),
     following: new DataLoader<string, boolean>(async (userIds) => {
       const viewer = await viewerId()
       if (!viewer) return userIds.map(() => false)

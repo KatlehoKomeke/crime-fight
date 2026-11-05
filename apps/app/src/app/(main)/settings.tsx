@@ -1,15 +1,15 @@
 import { graphql } from '@civic/graphql'
 import { useRouter } from 'expo-router'
-import { type ComponentProps, type ReactNode, useState } from 'react'
-import { Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { useState } from 'react'
+import { Platform, ScrollView, StyleSheet, View } from 'react-native'
 import { useMutation, useQuery } from 'urql'
 import { PageHeader, Screen } from '@/components/Screen'
 import { useToast } from '@/components/Toast'
-import { Avatar, Button, Skeleton, Txt } from '@/components/ui'
+import { Avatar, Button, Field, Input, Row, Section, Skeleton, Txt } from '@/components/ui'
 import { SettingsQuery, UpdateProfile } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
 import { pageMetadata } from '@/lib/seo'
-import { fonts, radius, useColors } from '@/theme'
+import { useColors } from '@/theme'
 
 export function generateMetadata() {
   return pageMetadata({ title: 'Settings', path: '/settings', noindex: true })
@@ -202,76 +202,9 @@ function LoadingRows() {
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  const c = useColors()
-  return (
-    <View style={[styles.section, { borderBottomColor: c.line }]}>
-      <Txt variant="micro" color="textMuted" style={styles.sectionTitle} accessibilityRole="header">
-        {title}
-      </Txt>
-      {children}
-    </View>
-  )
-}
-
-function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <View style={styles.row}>
-      <Txt variant="small" color="textMuted">
-        {label}
-      </Txt>
-      <Txt variant="bodyStrong">{value}</Txt>
-      {hint ? (
-        <Txt variant="small" color="textMuted">
-          {hint}
-        </Txt>
-      ) : null}
-    </View>
-  )
-}
-
-function Field({ label, count, over, children }: { label: string; count: string; over?: boolean; children: ReactNode }) {
-  const c = useColors()
-  return (
-    <View style={{ gap: 6 }}>
-      <View style={styles.fieldHead}>
-        <Txt variant="label">{label}</Txt>
-        <Txt variant="small" style={{ color: over ? c.danger : c.textMuted }}>
-          {count}
-        </Txt>
-      </View>
-      {children}
-    </View>
-  )
-}
-
-function Input(props: ComponentProps<typeof TextInput>) {
-  const c = useColors()
-  const [focused, setFocused] = useState(false)
-  return (
-    <TextInput
-      {...props}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      placeholderTextColor={c.textMuted}
-      style={[
-        styles.input,
-        props.multiline && styles.inputMultiline,
-        { color: c.text, backgroundColor: c.surface, borderColor: focused ? c.text : c.line },
-      ]}
-    />
-  )
-}
-
 const styles = StyleSheet.create({
-  section: { borderBottomWidth: 1, paddingBottom: 8 },
-  sectionTitle: { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 4 },
-  row: { gap: 3, paddingHorizontal: 18, paddingVertical: 10 },
   form: { gap: 16, paddingHorizontal: 18, paddingVertical: 12 },
   formHead: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  fieldHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  input: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 11, fontFamily: fonts.regular, fontSize: 15 },
-  inputMultiline: { minHeight: 88, textAlignVertical: 'top' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 18, paddingTop: 6, paddingBottom: 10 },
   formActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
 })

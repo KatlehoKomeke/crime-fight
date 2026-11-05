@@ -1,6 +1,6 @@
 import { TRUST_BADGE_LABEL, type TrustBadge } from '@civic/core'
 import { Image } from 'expo-image'
-import type { ReactNode } from 'react'
+import { type ComponentProps, type ReactNode, useState } from 'react'
 import {
   ActivityIndicator,
   Platform,
@@ -9,6 +9,7 @@ import {
   type StyleProp,
   StyleSheet,
   Text,
+  TextInput,
   type TextProps,
   type TextStyle,
   View,
@@ -229,10 +230,133 @@ export function EmptyState({ icon, title, body, action }: { icon: IconName; titl
   )
 }
 
+/* Forms and settings-style groups, shared by Settings and the bounty screens. */
+
+/** A group of rows under a muted uppercase title. */
+export function Section({ title, children, style }: { title: string; children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  const c = useColors()
+  return (
+    <View style={[styles.section, { borderBottomColor: c.line }, style]}>
+      <Txt variant="micro" color="textMuted" style={styles.sectionTitle} accessibilityRole="header">
+        {title}
+      </Txt>
+      {children}
+    </View>
+  )
+}
+
+/** A labelled value, with an optional hint under it or custom content in place of the value. */
+export function Row({ label, value, hint, children }: { label: string; value?: string; hint?: string; children?: ReactNode }) {
+  return (
+    <View style={styles.row}>
+      <Txt variant="small" color="textMuted">
+        {label}
+      </Txt>
+      {value !== undefined ? <Txt variant="bodyStrong">{value}</Txt> : null}
+      {children}
+      {hint ? (
+        <Txt variant="small" color="textMuted">
+          {hint}
+        </Txt>
+      ) : null}
+    </View>
+  )
+}
+
+/** A form control with its label, an optional character count, a hint and an inline error. */
+export function Field({ label, count, over, hint, error, children }: { label: string; count?: string; over?: boolean; hint?: string; error?: string | null; children: ReactNode }) {
+  const c = useColors()
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={styles.fieldHead}>
+        <Txt variant="label">{label}</Txt>
+        {count ? (
+          <Txt variant="small" style={{ color: over ? c.danger : c.textMuted }}>
+            {count}
+          </Txt>
+        ) : null}
+      </View>
+      {children}
+      {error ? (
+        <Txt variant="small" style={{ color: c.danger }} accessibilityRole="alert">
+          {error}
+        </Txt>
+      ) : hint ? (
+        <Txt variant="small" color="textMuted">
+          {hint}
+        </Txt>
+      ) : null}
+    </View>
+  )
+}
+
+export function Input({ invalid, style, ...props }: ComponentProps<typeof TextInput> & { invalid?: boolean }) {
+  const c = useColors()
+  const [focused, setFocused] = useState(false)
+  return (
+    <TextInput
+      {...props}
+      onFocus={(event) => {
+        setFocused(true)
+        props.onFocus?.(event)
+      }}
+      onBlur={(event) => {
+        setFocused(false)
+        props.onBlur?.(event)
+      }}
+      placeholderTextColor={c.textMuted}
+      style={[styles.input, props.multiline && styles.inputMultiline, { color: c.text, backgroundColor: c.surface, borderColor: invalid ? c.danger : focused ? c.text : c.line }, style]}
+    />
+  )
+}
+
+/** A pill in a single-choice group (post kind, bounty kind, duration). */
+export function Chip({ label, selected, onPress, subtle, disabled }: { label: string; selected: boolean; onPress: () => void; subtle?: boolean; disabled?: boolean }) {
+  const c = useColors()
+  return (
+    <Touchable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected, disabled }}
+      style={[styles.pill, { borderColor: selected ? c.text : c.line, backgroundColor: selected ? (subtle ? c.surfaceAlt : c.primary) : 'transparent' }, disabled && { opacity: 0.4 }]}
+      hoverStyle={{ borderColor: c.text }}
+    >
+      <Txt variant="micro" style={{ color: selected && !subtle ? c.onPrimary : c.text, textTransform: subtle ? 'capitalize' : 'uppercase', letterSpacing: subtle ? 0 : 0.8 }}>
+        {label}
+      </Txt>
+    </Touchable>
+  )
+}
+
+/** A declaration the person ticks. The label can hold links. */
+export function Checkbox({ checked, onChange, label, children }: { checked: boolean; onChange: (checked: boolean) => void; label: string; children?: ReactNode }) {
+  const c = useColors()
+  return (
+    <Pressable onPress={() => onChange(!checked)} accessibilityRole="checkbox" accessibilityState={{ checked }} accessibilityLabel={label} style={styles.checkbox}>
+      <View style={[styles.checkboxBox, { borderColor: checked ? c.primary : c.textMuted, backgroundColor: checked ? c.primary : 'transparent' }]}>
+        {checked ? <Icon name="check" size={14} color={c.onPrimary} /> : null}
+      </View>
+      <Txt variant="small" style={{ flex: 1 }}>
+        {children ?? label}
+      </Txt>
+    </Pressable>
+  )
+}
+
 export const textStyles = variants as Record<TxtVariant, TextStyle>
 export type { Palette }
 
 const styles = StyleSheet.create({
+  section: { borderBottomWidth: 1, paddingBottom: 8 },
+  sectionTitle: { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 4 },
+  row: { gap: 3, paddingHorizontal: 18, paddingVertical: 10 },
+  fieldHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  input: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 11, fontFamily: fonts.regular, fontSize: 15 },
+  inputMultiline: { minHeight: 88, textAlignVertical: 'top' },
+  pill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1 },
+  checkbox: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  checkboxBox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   button: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: radius.pill, borderWidth: 1 },
   buttonLabel: { fontFamily: fonts.bold },
   iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },

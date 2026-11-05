@@ -5,10 +5,14 @@ import * as appsync from 'aws-cdk-lib/aws-appsync'
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch'
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions'
 import type * as cognito from 'aws-cdk-lib/aws-cognito'
+import * as events from 'aws-cdk-lib/aws-events'
+import * as eventTargets from 'aws-cdk-lib/aws-events-targets'
+import * as iam from 'aws-cdk-lib/aws-iam'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs'
 import * as logs from 'aws-cdk-lib/aws-logs'
 import type * as rds from 'aws-cdk-lib/aws-rds'
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager'
 import * as sns from 'aws-cdk-lib/aws-sns'
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions'
 import * as triggers from 'aws-cdk-lib/triggers'
@@ -92,6 +96,10 @@ export class ApiStack extends Stack {
       authorizationConfig: { publishAuthModeTypes: [IAM], subscribeAuthModeTypes: [USER_POOL] },
     })
 
+    // Bounty money: the Paystack key stays in Secrets Manager; the site URL (for checkout return pages) in the Web stack's SSM parameter.
+    const paystackSecret = config.payments.secretName ? secretsmanager.Secret.fromSecretNameV2(this, 'PaystackSecret', config.payments.secretName) : undefined
+    const publicConfigParam = `/civic/${config.stage}/web/public-config`
+
     const graphql = new nodejs.NodejsFunction(this, 'Graphql', {
       ...common,
       entry: fromRoot('apps/api/src/handlers/graphql.ts'),
@@ -108,13 +116,32 @@ export class ApiStack extends Stack {
         PERSISTED_ONLY: String(config.persistedOnly),
         GRAPHIQL: String(config.stage !== 'prod'),
         REALTIME_HTTP_HOST: this.events.httpDns,
+        PAYMENTS_PROVIDER: config.payments.provider,
+        ...(paystackSecret ? { PAYSTACK_SECRET_ARN: paystackSecret.secretArn } : {}),
+        ADMIN_HANDLES: config.adminHandles.join(','),
+        PUBLIC_CONFIG_PARAM: publicConfigParam,
         NODE_OPTIONS: '--enable-source-maps',
       },
     })
     cluster.grantDataApiAccess(graphql)
     inbox.grantPublish(graphql)
+    paystackSecret?.grantRead(graphql)
+    graphql.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [this.formatArn({ service: 'ssm', resource: 'parameter', resourceName: publicConfigParam.slice(1) })],
+      }),
+    )
     // Deleting an account removes its Cognito user; a deleted user's tokens can't provision a new one.
     userPool.grant(graphql, 'cognito-idp:AdminGetUser', 'cognito-idp:AdminDeleteUser')
+
+    // Expiries, abandoned checkouts, silent posters and money the provider never confirmed: once an hour.
+    if (config.payments.sweep) {
+      new events.Rule(this, 'SweepBounties', {
+        schedule: events.Schedule.rate(Duration.hours(1)),
+        targets: [new eventTargets.LambdaFunction(graphql, { event: events.RuleTargetInput.fromObject({ source: 'civic.sweep' }), retryAttempts: 0 })],
+      })
+    }
 
     const migrate = new nodejs.NodejsFunction(this, 'Migrate', {
       ...common,
@@ -165,6 +192,8 @@ export class ApiStack extends Stack {
     const integration = new HttpLambdaIntegration('GraphqlIntegration', graphql)
     this.httpApi.addRoutes({ path: '/graphql', methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST], integration })
     this.httpApi.addRoutes({ path: '/health', methods: [apigwv2.HttpMethod.GET], integration })
+    // Payment provider webhooks; the function verifies the signature on the raw body.
+    this.httpApi.addRoutes({ path: '/payments/{proxy+}', methods: [apigwv2.HttpMethod.POST], integration })
     this.httpApi.addRoutes({ path: '/og/{proxy+}', methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.HEAD], integration: new HttpLambdaIntegration('OgIntegration', og) })
     const stage = this.httpApi.defaultStage!.node.defaultChild as apigwv2.CfnStage
     stage.defaultRouteSettings = { throttlingRateLimit: config.api.throttleRate, throttlingBurstLimit: config.api.throttleBurst }

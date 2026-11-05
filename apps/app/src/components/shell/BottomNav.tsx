@@ -1,43 +1,53 @@
-import { Link, usePathname } from 'expo-router'
+import { Link, usePathname, useRouter } from 'expo-router'
 import { Platform, Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useQuery } from 'urql'
 import { ViewerQuery } from '@/graphql/documents'
 import { useAuth } from '@/lib/auth'
+import { usePaymentsStatus } from '@/lib/payments'
 import { useUnreadNotifications } from '@/lib/unread-notifications'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { brand, fixed, useColors } from '@/theme'
 import { useCompose } from '../ComposeProvider'
 import { Icon } from '../Icon'
-import { navItems } from './nav'
+import { phoneTabs, sectionOf } from './nav'
 
-/** Phone navigation: tab bar plus a floating compose button. */
+/** Bounty pages that are themselves a form, a payment step or the review queue: no floating button over them. */
+const NO_FAB = /^\/bounties\/(new|review|rules|[^/]+\/(claim|paid|pay))/
+
+/** Phone navigation: tab bar plus a floating button to report a crime or post a bounty. */
 export function BottomNav() {
   const c = useColors()
   const pathname = usePathname()
+  const router = useRouter()
   const unread = useUnreadNotifications()
   const insets = useSafeAreaInsets()
   const { status } = useAuth()
   const gate = useRequireAuth()
   const { openCompose } = useCompose()
+  const payments = usePaymentsStatus()
   const [{ data }] = useQuery({ query: ViewerQuery, pause: status !== 'signed-in' })
-  const items = navItems(status === 'signed-in' ? (data?.viewer?.handle ?? null) : null).filter((item) => item.phone)
+  const items = phoneTabs(status === 'signed-in' ? (data?.viewer?.handle ?? null) : null)
+  const section = sectionOf(pathname)
   // A conversation's composer owns the bottom of the screen; posting doesn't belong anywhere in Messages.
   if (/^\/messages\/(?!new$)[^/]+$/.test(pathname)) return null
 
+  const fab =
+    section === 'bounties'
+      ? payments.enabled && !NO_FAB.test(pathname)
+        ? { label: 'Post a bounty', icon: 'bounty' as const, onPress: gate(() => router.push('/bounties/new'), 'Sign in to post a bounty') }
+        : null
+      : pathname.startsWith('/messages')
+        ? null
+        : { label: 'Report a crime', icon: 'plus' as const, onPress: gate(() => openCompose(), 'Sign in to report a crime') }
+
   return (
     <>
-      {pathname.startsWith('/messages') ? null : (
-        <Pressable
-          dataSet={{ shell: 'fab' }}
-          onPress={gate(() => openCompose(), 'Sign in to report a crime')}
-          accessibilityRole="button"
-          accessibilityLabel="Report a crime"
-          style={[styles.fab, fixed, { bottom: insets.bottom + 74, backgroundColor: c.primary }]}
-        >
-          <Icon name="plus" size={24} color={c.primary === brand.ink ? brand.lime : c.onPrimary} />
+      {fab ? (
+        <Pressable dataSet={{ shell: 'fab' }} onPress={fab.onPress} accessibilityRole="button" accessibilityLabel={fab.label} style={[styles.fab, fixed, { bottom: insets.bottom + 74, backgroundColor: c.primary }]}>
+          <Icon name={fab.icon} size={24} color={c.primary === brand.ink ? brand.lime : c.onPrimary} />
         </Pressable>
-      )}
+      ) : null}
       <View
         dataSet={{ shell: 'bottom' }}
         role="navigation"
@@ -50,7 +60,7 @@ export function BottomNav() {
           return (
             <Link key={item.key} href={item.href as never} asChild>
               <Pressable accessibilityLabel={dot ? `${item.label} (new)` : item.label} accessibilityState={{ selected: active }} aria-current={active ? 'page' : undefined} style={styles.item}>
-                <Icon name={item.icon} size={24} color={active ? c.accentText : c.text} filled={active && item.icon !== 'search'} />
+                <Icon name={item.icon} size={24} color={active ? c.accentText : c.text} filled={active && item.icon !== 'search' && item.icon !== 'bounty'} />
                 {dot ? <View style={[styles.dot, { backgroundColor: brand.coral, borderColor: c.surface }]} /> : null}
               </Pressable>
             </Link>

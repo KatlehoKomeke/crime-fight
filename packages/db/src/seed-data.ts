@@ -184,3 +184,88 @@ export function fillerPosts(count = 40): SeedPost[] {
     }
   })
 }
+
+export interface SeedBounty {
+  poster: string
+  kind: 'PROPERTY' | 'MISSING_PERSON' | 'INFORMATION'
+  status: 'PENDING_PAYMENT' | 'PENDING_REVIEW' | 'OPEN' | 'PAID'
+  title: string
+  body: string
+  area?: string
+  sapsCaseNumber?: string
+  relationship?: string
+  amountCents: number
+  durationDays: number
+  fundedMinutesAgo: number
+  closedMinutesAgo?: number
+  claims?: Array<{ claimant: string; status: 'SUBMITTED' | 'PAID'; body: string; minutesAgo: number }>
+}
+
+/** Bounties in every state the board shows, plus one for the admin queue. */
+export const seedBounties: SeedBounty[] = [
+  {
+    poster: 'jordan_o',
+    kind: 'PROPERTY',
+    status: 'OPEN',
+    title: 'Silver 2016 Toyota Corolla, CA 442-118, taken from Albert Road',
+    body: 'Taken from outside the community hall on Albert Road between 19:00 and 21:30 on Monday. Silver, small dent on the rear left door, child seat in the back. Reported to Woodstock SAPS. The reward is for the car coming back through SAPS, whatever state it is in.',
+    area: 'Woodstock',
+    sapsCaseNumber: 'CAS 212/11/2026',
+    amountCents: 500000,
+    durationDays: 60,
+    fundedMinutesAgo: 60 * 24 * 2,
+  },
+  {
+    poster: 'harbor_watch',
+    kind: 'INFORMATION',
+    status: 'OPEN',
+    title: 'Information on the Harbor Avenue camera vandalism',
+    body: 'Three of the residents’ association cameras on Harbor Avenue were cut down on the night of 28 October. We want information that helps SAPS make an arrest, given to the Harbor Avenue station first, not to us. Please do not approach anyone.',
+    area: 'Harbor Avenue',
+    sapsCaseNumber: 'CAS 88/10/2026',
+    amountCents: 200000,
+    durationDays: 90,
+    fundedMinutesAgo: 60 * 24 * 5,
+    claims: [
+      {
+        claimant: 'jordan_o',
+        status: 'SUBMITTED',
+        body: 'I gave a statement at Harbor Avenue SAPS on 2 November about a van I saw parked under the cameras that night, with its registration. The officer was Sgt Dlamini and it was added to the case. I have the receipt for the statement.',
+        minutesAgo: 60 * 24 * 1,
+      },
+    ],
+  },
+  {
+    poster: 'thandi_m',
+    kind: 'PROPERTY',
+    status: 'PAID',
+    title: 'Black Giant hybrid bicycle taken from the Gardens station rack',
+    body: 'Locked at the Gardens station rack on 20 October, gone by 18:00. Black Giant Escape with a brown saddle and a child seat mount. Reported at Gardens SAPS.',
+    area: 'Gardens',
+    amountCents: 80000,
+    durationDays: 30,
+    fundedMinutesAgo: 60 * 24 * 14,
+    closedMinutesAgo: 60 * 24 * 3,
+    claims: [
+      {
+        claimant: 'jordan_o',
+        status: 'PAID',
+        body: 'Saw it chained outside a flat on Mill Street with the child seat mount still on. Called Gardens SAPS, who collected it and matched the frame number; Thandi collected it from the station the next day.',
+        minutesAgo: 60 * 24 * 7,
+      },
+    ],
+  },
+  {
+    poster: 'thandi_m',
+    kind: 'MISSING_PERSON',
+    status: 'PENDING_REVIEW',
+    title: 'Missing: my brother Lwazi, 29, last seen in Observatory on 3 November',
+    body: 'Lwazi left home on Sunday afternoon and hasn’t been in touch since. He was wearing a grey hoodie and black jeans. Reported to Woodstock SAPS. If you see him, call 10111 with the case number; please don’t post where he is.',
+    area: 'Observatory',
+    sapsCaseNumber: 'CAS 230/11/2026',
+    relationship: 'Brother',
+    amountCents: 300000,
+    durationDays: 30,
+    fundedMinutesAgo: 60 * 6,
+  },
+]

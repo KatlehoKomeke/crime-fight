@@ -43,10 +43,21 @@ export interface StageConfig {
    * should be allowed to pause, because the requests would keep it awake.
    */
   warm: boolean
+  /**
+   * Bounty money. `paystack` once a Secrets Manager secret (`secretName`, JSON
+   * `{"secretKey": "sk_...", "fingerprintKey": "<random, never rotated>"}`)
+   * exists for the stage; until then `disabled`, which lists bounties read-only.
+   * See docs/adr/0006-bounties.md for what must be true before live keys.
+   */
+  payments: { provider: 'disabled' | 'paystack'; secretName?: string; sweep: boolean }
+  /** Handles who review bounties and release money. Never handed out by sign-in. */
+  adminHandles: string[]
 }
 
 const env = process.env
 const optionalNumber = (value: string | undefined) => (value ? Number(value) : undefined)
+const handles = (value: string | undefined) => (value ?? '').split(',').map((h) => h.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)
+const payments = (secretName: string | undefined, sweep: boolean): StageConfig['payments'] => (secretName ? { provider: 'paystack', secretName, sweep } : { provider: 'disabled', sweep })
 
 const sso: SsoConfig = {
   google: env.GOOGLE_CLIENT_ID ? { clientId: env.GOOGLE_CLIENT_ID } : undefined,
@@ -78,6 +89,9 @@ export const stages: Record<StageName, StageConfig> = {
     extraCallbackUrls: ['http://localhost:8081/auth/callback'],
     sso,
     warm: false,
+    // No hourly sweep on QA: it would keep Aurora awake.
+    payments: payments(env.QA_PAYSTACK_SECRET_NAME, false),
+    adminHandles: handles(env.QA_ADMIN_HANDLES ?? env.ADMIN_HANDLES),
   },
   prod: {
     stage: 'prod',
@@ -96,6 +110,8 @@ export const stages: Record<StageName, StageConfig> = {
     extraCallbackUrls: [],
     sso,
     warm: true,
+    payments: payments(env.PROD_PAYSTACK_SECRET_NAME, true),
+    adminHandles: handles(env.PROD_ADMIN_HANDLES ?? env.ADMIN_HANDLES),
   },
 }
 

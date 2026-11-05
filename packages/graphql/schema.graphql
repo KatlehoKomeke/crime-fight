@@ -7,6 +7,238 @@ enum AlertSeverity {
   WARNING
 }
 
+type Bank {
+  code: String!
+  name: String!
+}
+
+"""
+A reward, paid in up front and held by CIVIC/ONE, for a verifiable outcome.
+"""
+type Bounty {
+  amountCents: Int!
+  area: String
+  body: String!
+  claimCount: Int!
+
+  """
+  Every claim, oldest first. Poster and admins only; others get an empty list.
+  """
+  claims: [BountyClaim!]!
+  closedAt: DateTime
+  createdAt: DateTime!
+  currency: String!
+  durationDays: Int!
+
+  """
+  The activity trail, oldest first: the public part for everyone, all of it for the poster and admins.
+  """
+  events: [BountyEvent!]!
+  expiresAt: DateTime
+  frozenFromStatus: BountyStatus
+  fundedAt: DateTime
+  id: ID!
+
+  """Open but past its date; the hourly sweep closes and refunds it."""
+  isExpired: Boolean!
+  kind: BountyKind!
+
+  """The most recent payout attempt. Admins only."""
+  latestPayout: LedgerEntry
+
+  """Every movement of money, oldest first. Admins only."""
+  ledger: [LedgerEntry!]!
+  post: Post
+
+  """Null once the poster deleted their account."""
+  poster: User
+  previewImage: PreviewImage!
+
+  """Missing person: how the poster knows them. Poster and admins only."""
+  relationship: String
+
+  """Admins only."""
+  reports: [BountyReport!]!
+
+  """
+  Public on missing-person bounties (a sighting needs it to call 10111); otherwise for signed-in members.
+  """
+  sapsCaseNumber: String
+  status: BountyStatus!
+  title: String!
+  viewerClaim: BountyClaim
+  viewerIsPoster: Boolean!
+
+  """The confirmed, verified or paid claim. Poster and admins only."""
+  winningClaim: BountyClaim
+}
+
+"""
+A bounty and where to pay for it. The URL is null when the provider couldn’t open a checkout; retry from the bounty page.
+"""
+type BountyCheckout {
+  bounty: Bounty!
+  checkoutUrl: String
+}
+
+"""
+Someone saying they fulfilled a bounty. Visible to the claimant, the poster and admins.
+"""
+type BountyClaim {
+  body: String!
+  bounty: Bounty!
+  claimant: User
+  confirmedAt: DateTime
+
+  """Earliest CIVIC/ONE may release the money."""
+  cooldownUntil: DateTime
+  createdAt: DateTime!
+  decidedAt: DateTime
+  decisionNote: String
+  decisionReason: ClaimDecisionReason
+  disputeNote: String
+  id: ID!
+  links: [String!]!
+
+  """
+  Where the money goes: the claimant’s current account, or the one it went to. Admins only.
+  """
+  payoutAccount: PayoutAccount
+  posterNote: String
+
+  """What an admin should weigh before paying. Admins only."""
+  preflight: ReleasePreflight
+  rejectedAt: DateTime
+  status: ClaimStatus!
+  viewerIsClaimant: Boolean!
+}
+
+type BountyClaimConnection {
+  edges: [BountyClaimEdge!]!
+  pageInfo: PageInfo!
+}
+
+type BountyClaimEdge {
+  cursor: String!
+  node: BountyClaim!
+}
+
+type BountyConnection {
+  edges: [BountyEdge!]!
+  pageInfo: PageInfo!
+}
+
+type BountyEdge {
+  cursor: String!
+  node: Bounty!
+}
+
+type BountyEvent {
+  """
+  Null for CIVIC/ONE itself and for admin actions, which are never attributed by name.
+  """
+  actor: User
+  byAdmin: Boolean!
+  claimId: ID
+  createdAt: DateTime!
+  id: ID!
+  kind: BountyEventKind!
+  note: String
+}
+
+enum BountyEventKind {
+  APPROVED
+  CANCELLED
+  CANCEL_REQUESTED
+  CHARGEBACK
+  CLAIM_CONFIRMED
+  CLAIM_DISPUTED
+  CLAIM_ESCALATED
+  CLAIM_REJECTED
+  CLAIM_REJECTED_BY_POSTER
+  CLAIM_SUBMITTED
+  CLAIM_VERIFIED
+  CLAIM_WITHDRAWN
+  CREATED
+  DECLINED
+  EXPIRED
+  EXPIRING
+  FROZEN
+  FUNDED
+  PAID
+  PAYOUT_FAILED
+  PAYOUT_SENT
+  REFUNDED
+  REFUND_FAILED
+  REPORTED
+  UNFROZEN
+}
+
+enum BountyKind {
+  INFORMATION
+  MISSING_PERSON
+  PROPERTY
+}
+
+type BountyReport {
+  createdAt: DateTime!
+  note: String
+  reason: BountyReportReason!
+  reporter: User
+}
+
+enum BountyReportReason {
+  NOT_MISSING
+  OTHER
+  PERSONAL_INFORMATION
+  SCAM
+  TARGETS_A_PERSON
+}
+
+enum BountyStatus {
+  ABANDONED
+  AWAITING_VERIFICATION
+  CANCELLED
+  EXPIRED
+  FROZEN
+  OPEN
+  PAID
+  PENDING_PAYMENT
+  PENDING_REVIEW
+  RELEASING
+}
+
+enum ClaimDecision {
+  REJECT
+  VERIFY
+}
+
+enum ClaimDecisionReason {
+  ADMIN_OVERRIDE
+  BOUNTY_CLOSED
+  DUPLICATE
+  INVOLVED
+  LEGAL_HOLD
+  NOT_ENOUGH_EVIDENCE
+  NOT_VIA_SAPS
+  OTHER_CLAIM_PAID
+  OUTCOME_NOT_MET
+  SAFETY
+  TERMS_BREACH
+  VERIFIED
+}
+
+enum ClaimStatus {
+  CONFIRMED
+  DISPUTED
+  PAID
+  REJECTED
+  REJECTED_BY_POSTER
+  SUBMITTED
+  VERIFIED
+  WITHDRAWN
+}
+
 """
 A private conversation. For now always between two people who follow each other.
 """
@@ -36,6 +268,24 @@ type ConversationConnection {
 type ConversationEdge {
   cursor: String!
   node: Conversation!
+}
+
+input CreateBountyInput {
+  """Whole rands, in cents: 20000–5000000."""
+  amountCents: Int!
+  area: String
+  body: String!
+  durationDays: Int!
+  kind: BountyKind!
+
+  """Your own update reporting the crime."""
+  postId: ID
+
+  """Missing person: how you know them."""
+  relationship: String
+  sapsCaseNumber: String
+  termsAccepted: Boolean!
+  title: String!
 }
 
 input CreatePostInput {
@@ -72,6 +322,19 @@ type InboxEvent {
   viewer: User!
 }
 
+type LedgerEntry {
+  amountCents: Int!
+  createdAt: DateTime!
+  id: ID!
+  note: String
+  provider: String!
+  providerRef: String
+  reference: String!
+  settledAt: DateTime
+  status: String!
+  type: String!
+}
+
 type Media {
   alt: String!
   caption: String
@@ -101,40 +364,100 @@ type MessageEdge {
 }
 
 type Mutation {
+  adminCancelBounty(id: ID!, note: String!): Bounty!
+  approveBounty(id: ID!, note: String!): Bounty!
+
+  """
+  Refunds and closes your bounty. Not while a claim is waiting; ask CIVIC/ONE instead.
+  """
+  cancelBounty(id: ID!): Bounty!
+
+  """
+  Asks the provider whether the checkout went through (the return page calls this; the webhook may already have).
+  """
+  confirmBountyPayment(id: ID!): Bounty!
+
+  """
+  The poster confirms the outcome happened. CIVIC/ONE verifies after the cooling-off period.
+  """
+  confirmClaim(id: ID!, note: String): BountyClaim!
+
+  """
+  Creates the bounty and opens a checkout for it. It’s listed once the payment settles.
+  """
+  createBounty(input: CreateBountyInput!): BountyCheckout!
   createPost(input: CreatePostInput!): Post!
+
+  """
+  Verifies (and pays) or rejects a confirmed or disputed claim. Admins only.
+  """
+  decideClaim(decision: ClaimDecision!, id: ID!, note: String!, reason: ClaimDecisionReason!): BountyClaim!
+  declineBounty(id: ID!, note: String!): Bounty!
 
   """
   Permanently deletes your account: profile, posts and the replies under them, likes, reposts, saves, follows and conversations. `handle` must be your own handle, to confirm.
   """
   deleteAccount(handle: String!): Boolean!
   deletePost(id: ID!): ID!
+
+  """The claimant disagrees with a rejection; CIVIC/ONE decides."""
+  disputeClaim(id: ID!, note: String!): BountyClaim!
   followUser(id: ID!): User!
+  freezeBounty(id: ID!, note: String!): Bounty!
   likePost(id: ID!): Post!
   markConversationRead(id: ID!): InboxEvent!
+  rejectClaim(id: ID!, note: String!): BountyClaim!
+  reportBounty(id: ID!, note: String, reason: BountyReportReason!): Bounty!
   repostPost(id: ID!): Post!
+  requestBountyCancellation(id: ID!, note: String!): Bounty!
+
+  """A new checkout for a bounty that hasn’t been paid for."""
+  retryBountyCheckout(id: ID!): BountyCheckout!
+  retryBountyPayout(id: ID!): Bounty!
+
+  """Sandbox only: pretends the checkout was paid (or failed)."""
+  sandboxCompleteCheckout(id: ID!, outcome: String = "SUCCESS"): Bounty!
   savePost(id: ID!): Post!
   sendMessage(body: String!, conversationId: ID!): InboxEvent!
+
+  """
+  The bank account your bounty payouts go to. A new account waits before it can receive money.
+  """
+  setPayoutAccount(input: PayoutAccountInput!): PayoutAccount!
 
   """
   Opens your conversation with someone you follow who follows you back, creating it the first time.
   """
   startConversation(userId: ID!): Conversation!
+  submitClaim(bountyId: ID!, input: SubmitClaimInput!): BountyClaim!
+
+  """
+  Runs the hourly sweep now: expiries, abandoned checkouts, silent posters, pending money. Admins only.
+  """
+  sweepBounties: SweepReport!
   unfollowUser(id: ID!): User!
+  unfreezeBounty(id: ID!, note: String!): Bounty!
   unlikePost(id: ID!): Post!
   unrepostPost(id: ID!): Post!
   unsavePost(id: ID!): Post!
   updateProfile(input: UpdateProfileInput!): User!
+  withdrawClaim(id: ID!): BountyClaim!
 }
 
 """
 An official alert near the viewer, or someone replying to, liking, reposting or following them.
 """
 type Notification {
-  """The alert’s author, or whoever replied, liked, reposted or followed."""
-  actor: User!
+  """
+  The alert’s author, or whoever replied, liked, reposted or followed. Null when CIVIC/ONE itself did something to a bounty.
+  """
+  actor: User
+  bounty: Bounty
+  bountyEvent: BountyEventKind
   createdAt: DateTime!
   id: ID!
   kind: NotificationKind!
+  note: String
 
   """
   The alert, the reply, or the viewer’s post that was liked or reposted. Null for follows.
@@ -154,6 +477,7 @@ type NotificationEdge {
 
 enum NotificationKind {
   ALERT
+  BOUNTY
   FOLLOW
   LIKE
   REPLY
@@ -167,11 +491,51 @@ type PageInfo {
   startCursor: String
 }
 
+"""
+Whether bounties can be posted: DISABLED lists them read-only until payments go live.
+"""
+enum PaymentsStatus {
+  DISABLED
+  PAYSTACK_LIVE
+  PAYSTACK_TEST
+  SANDBOX
+}
+
+"""
+Where a claimant is paid. The account number is never stored; only its last four digits.
+"""
+type PayoutAccount {
+  accountLast4: String!
+  accountName: String!
+  bankCode: String!
+  bankName: String!
+  createdAt: DateTime!
+  id: ID!
+
+  """A new account waits before it can receive money."""
+  readyAt: DateTime!
+  status: PayoutAccountStatus!
+}
+
+input PayoutAccountInput {
+  accountName: String!
+  accountNumber: String!
+  bankCode: String!
+}
+
+enum PayoutAccountStatus {
+  ACTIVE
+  REPLACED
+}
+
 """A community update, official alert/advisory, or a reply."""
 type Post {
   area: String
   author: User!
   body: String!
+
+  """The bounty raised from this update, while it’s on the board."""
+  bounty: Bounty
   category: String
   createdAt: DateTime!
   id: ID!
@@ -222,6 +586,22 @@ type PreviewImage {
 }
 
 type Query {
+  """Banks a payout account can be at."""
+  banks: [Bank!]!
+
+  """
+  The board: open bounties, or with `honoured`, the paid ones. Newest first.
+  """
+  bounties(after: String, before: String, first: Int, honoured: Boolean, kind: BountyKind, last: Int): BountyConnection!
+
+  """Null if it doesn’t exist or you may not see it."""
+  bounty(id: ID!): Bounty
+
+  """
+  Bounties that need an admin: reviews, confirmed claims, disputes, failed payouts, holds, reports and cancellation requests.
+  """
+  bountyQueue(after: String, before: String, first: Int, last: Int): BountyConnection!
+
   """
   One of your conversations; null if it doesn’t exist or you’re not in it.
   """
@@ -239,10 +619,17 @@ type Query {
   """People you can message: everyone you follow who follows you back."""
   messageContacts(first: Int, query: String): [User!]!
 
+  """Everything you posted, newest first."""
+  myBounties(after: String, before: String, first: Int, last: Int): BountyConnection!
+
+  """Everything you claimed, newest first."""
+  myClaims(after: String, before: String, first: Int, last: Int): BountyClaimConnection!
+
   """
   Official alerts and advisories and, when signed in, replies, likes, reposts and follows from other people. Newest first.
   """
   notifications(after: String, before: String, first: Int, last: Int): NotificationConnection!
+  paymentsStatus: PaymentsStatus!
   post(id: ID!): Post
   savedPosts(after: String, before: String, first: Int, last: Int): PostConnection!
   search(after: String, before: String, first: Int, last: Int, query: String!): PostConnection!
@@ -256,11 +643,37 @@ type Query {
   viewer: User
 }
 
+type ReleasePreflight {
+  claimantCreatedAfterBounty: Boolean!
+  claimantHasNoOtherActivity: Boolean!
+  cooldownEndsAt: String
+  payoutAccountAgeHours: Int
+  payoutNameMismatch: Boolean!
+  priorPairings: Int!
+}
+
+input SubmitClaimInput {
+  """You weren’t involved, didn’t buy the item back, and went through SAPS."""
+  attested: Boolean!
+  body: String!
+
+  """Up to three https links, shown as text."""
+  links: [String!]
+}
+
 type Subscription {
   """
   Your inbox events. Not served over /graphql: subscribe to `viewer.inboxChannel` on the realtime endpoint, where each event arrives as this subscription’s result.
   """
   inbox: InboxEvent!
+}
+
+type SweepReport {
+  abandoned: Int!
+  escalated: Int!
+  expired: Int!
+  expiring: Int!
+  redriven: Int!
 }
 
 type Topic {
@@ -293,6 +706,14 @@ input UpdateProfileInput {
 type User {
   avatarUrl: String
   bio: String!
+
+  """
+  This person’s bounties on the board; all of them to the person themselves.
+  """
+  bounties(after: String, before: String, first: Int, last: Int): BountyConnection!
+
+  """Bounties on the board, open or honoured."""
+  bountyCount: Int!
   createdAt: DateTime!
   displayName: String!
 
@@ -309,6 +730,11 @@ type User {
   following(after: String, before: String, first: Int, last: Int): UserConnection!
   followingCount: Int!
   handle: String!
+
+  """
+  Bounties CIVIC/ONE holds money for, which stop the account being deleted. Owner only.
+  """
+  heldBountyIds: [ID!]!
   id: ID!
 
   """
@@ -317,6 +743,9 @@ type User {
   inboxChannel: String
   initials: String!
   isViewer: Boolean!
+
+  """Only visible to the account owner."""
+  payoutAccount: PayoutAccount
   postCount: Int!
   posts(after: String, before: String, first: Int, last: Int): PostConnection!
   previewImage: PreviewImage!
@@ -331,6 +760,9 @@ type User {
 
   """You follow each other, so you can exchange direct messages."""
   viewerCanMessage: Boolean!
+
+  """Whether you review bounties. Only visible to the account owner."""
+  viewerIsAdmin: Boolean!
   viewerIsFollowing: Boolean!
 }
 

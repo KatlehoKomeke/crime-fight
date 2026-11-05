@@ -11,6 +11,9 @@ const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`)
 /** A profile's page, or one of its follow lists, which share the profile's card. */
 export function profileMetadata(user: Profile, list?: FollowList) {
   const name = `${user.displayName} (@${user.handle})`
+  if (list === 'bounties') {
+    return pageMetadata({ title: `Bounties posted by ${name}`, description: `Rewards ${name} has posted on CIVIC/ONE.`, path: profilePath(user.handle, list), image: user.previewImage, noindex: true })
+  }
   if (list) {
     return pageMetadata({
       title: list === 'followers' ? `People following ${name}` : `People followed by ${name}`,

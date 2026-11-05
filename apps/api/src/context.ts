@@ -4,6 +4,7 @@ import type { Authenticator, Identity } from './auth'
 import { createLoaders, type Loaders } from './data/loaders'
 import { resolveViewer } from './data/users'
 import { apiError } from './errors'
+import type { Payments } from './payments'
 import type { Publisher } from './realtime/publisher'
 import type { SignIns } from './sign-ins'
 
@@ -14,13 +15,25 @@ export interface Context {
   /** Lazily resolved (and provisioned on first sign-in); costs nothing for anonymous requests. */
   viewer: () => Promise<User | null>
   requireViewer: () => Promise<User>
+  /** Admins review bounties and release money. Configured by handle (ADMIN_HANDLES), never a public role. */
+  isAdmin: () => Promise<boolean>
+  requireAdmin: () => Promise<User>
   loaders: Loaders
   realtime: Publisher
+  payments: Payments
   /** This request as another user sees it, with their own loaders: resolves each recipient's copy of a realtime event. */
   as: (user: User) => Context
 }
 
-function buildContext(db: Database, realtime: Publisher, signIns: SignIns, identity: Identity | null, resolve: () => Promise<User | null>): Context {
+interface Services {
+  db: Database
+  realtime: Publisher
+  signIns: SignIns
+  payments: Payments
+  adminHandles: Set<string>
+}
+
+function buildContext(services: Services, identity: Identity | null, resolve: () => Promise<User | null>): Context {
   let viewerPromise: Promise<User | null> | undefined
   const viewer = () => (viewerPromise ??= resolve())
   const requireViewer = async () => {
@@ -28,25 +41,37 @@ function buildContext(db: Database, realtime: Publisher, signIns: SignIns, ident
     if (!user) throw apiError('UNAUTHENTICATED', 'Sign in to do that')
     return user
   }
+  const isAdmin = async () => {
+    const user = await viewer()
+    return Boolean(user && services.adminHandles.has(user.handle))
+  }
+  const requireAdmin = async () => {
+    const user = await requireViewer()
+    if (!services.adminHandles.has(user.handle)) throw apiError('FORBIDDEN', 'Only CIVIC/ONE admins can do that')
+    return user
+  }
 
   return {
-    db,
+    db: services.db,
     identity,
-    signIns,
+    signIns: services.signIns,
     viewer,
     requireViewer,
-    loaders: createLoaders(db, async () => (await viewer())?.id ?? null),
-    realtime,
-    as: (user) => buildContext(db, realtime, signIns, null, () => Promise.resolve(user)),
+    isAdmin,
+    requireAdmin,
+    loaders: createLoaders(services.db, async () => (await viewer())?.id ?? null),
+    realtime: services.realtime,
+    payments: services.payments,
+    as: (user) => buildContext(services, null, () => Promise.resolve(user)),
   }
 }
 
-export function createContextFactory(db: Database, authenticate: Authenticator, realtime: Publisher, signIns: SignIns) {
+export function createContextFactory(services: Services, authenticate: Authenticator) {
   return async ({ request }: YogaInitialContext): Promise<Context> => {
     const identity = await authenticate(request)
     if (identity === 'invalid') {
       throw apiError('UNAUTHENTICATED', 'Your session has expired. Please sign in again.', { http: { status: 401 } })
     }
-    return buildContext(db, realtime, signIns, identity, () => (identity ? resolveViewer(db, identity, signIns) : Promise.resolve(null)))
+    return buildContext(services, identity, () => (identity ? resolveViewer(services.db, identity, services.signIns, services.adminHandles) : Promise.resolve(null)))
   }
 }

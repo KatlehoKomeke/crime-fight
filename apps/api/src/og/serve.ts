@@ -3,7 +3,7 @@ import { createLoaders } from '../data/loaders'
 import { loadCard, previewImage } from './cards'
 import { renderCard } from './render'
 
-const PATH = /^\/og\/(profile|post|topic|page)\/([^/]+)\.png$/
+const PATH = /^\/og\/(profile|post|topic|page|bounty)\/([^/]+)\.png$/
 
 const notFound = () => new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain', 'cache-control': 'public, max-age=60' } })
 
@@ -31,6 +31,7 @@ export async function serveOg(db: Database, url: URL): Promise<Response> {
     return new Response(null, { status: 302, headers: { location: image.path, 'cache-control': 'public, max-age=300' } })
   }
   return new Response(await renderCard(card), {
-    headers: { 'content-type': 'image/png', 'cache-control': current ? 'public, max-age=31536000, immutable' : 'public, max-age=86400' },
+    // A bounty can be taken down; its card isn't kept for a year like a profile's.
+    headers: { 'content-type': 'image/png', 'cache-control': current && card.kind !== 'bounty' ? 'public, max-age=31536000, immutable' : 'public, max-age=86400' },
   })
 }

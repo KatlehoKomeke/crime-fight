@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
@@ -16,6 +17,9 @@ import { serveOg } from '../src/og/serve'
 import { attachLocalRealtime } from '../src/realtime/local-server'
 import { memoryHub } from '../src/realtime/publisher'
 import type { SignIns } from '../src/sign-ins'
+import { handleProviderEvent } from '../src/data/bounties'
+import { paystackProvider } from '../src/payments/paystack'
+import { sandboxProvider } from '../src/payments/sandbox'
 import { createApi } from '../src/yoga'
 
 const TEST_URL = process.env.TEST_DATABASE_URL ?? 'postgres://civic:civic@localhost:54329/civic_test'
@@ -41,6 +45,8 @@ let api: ReturnType<typeof createApi>
 let queries = 0
 /** Inbox events the API publishes, as AppSync Events would deliver them. */
 const hub = memoryHub()
+/** Pretend money: checkouts complete on request, transfers settle at once, an account ending 0000 bounces. */
+const payments = { provider: sandboxProvider({ siteUrl: 'http://test' }), siteUrl: 'http://test', fingerprintKey: 'test' }
 
 interface GqlResult<T> {
   status: number
@@ -72,6 +78,7 @@ const FEED = /* GraphQL */ `
           topics { slug }
           viewerHasLiked
           likeCount
+          bounty { id }
         }
       }
       pageInfo { hasNextPage endCursor }
@@ -102,7 +109,7 @@ beforeAll(async () => {
   const config = await ensureDatabase()
   await runMigrations(config, fileURLToPath(new URL('../../../packages/db/migrations', import.meta.url)))
   handle = createDb({ ...config, logger: { logQuery: () => void queries++ } })
-  api = createApi({ db: handle.db, env: readEnv({ STAGE: 'test', AUTH_MODE: 'dev' }), realtime: hub })
+  api = createApi({ db: handle.db, env: readEnv({ STAGE: 'test', AUTH_MODE: 'dev', ADMIN_HANDLES: 'civicone' }), realtime: hub, payments })
 })
 
 beforeEach(async () => {
@@ -145,8 +152,8 @@ describe('feed', () => {
   it('resolves nested fields in a constant number of queries (no N+1)', async () => {
     const { data } = await gql(FEED, { first: 20 }, 'alexm')
     expect(data.feed.edges).toHaveLength(20)
-    // viewer + page + authors + media + topics + likes, regardless of page size.
-    expect(queries).toBeLessThanOrEqual(6)
+    // viewer + page + authors + media + topics + likes + bounties, regardless of page size.
+    expect(queries).toBeLessThanOrEqual(7)
   })
 
   it('rejects backward pagination instead of ignoring it', async () => {
@@ -197,9 +204,9 @@ describe('notifications', () => {
   })
 
   it('pages through alerts and activity together without gaps or repeats', async () => {
-    // jordan_o has a seeded reply from harbor_watch to merge with the four seeded alerts.
+    // jordan_o has a seeded reply from harbor_watch and three bounty events (claim confirmed, verified, paid) to merge with the four seeded alerts.
     const all = nodesOf(await gql(NOTIFICATIONS, { first: 50 }, 'jordan_o')).map((n) => n.id)
-    expect(all).toHaveLength(5)
+    expect(all).toHaveLength(8)
     const ids: string[] = []
     let after: string | null = null
     do {
@@ -690,5 +697,263 @@ describe('account deletion', () => {
     await signIns.remove(google)
     await expect(resolveViewer(handle.db, google, signIns)).rejects.toMatchObject({ extensions: { code: 'UNAUTHENTICATED' } })
     expect(await handle.db.select().from(schema.users).where(eq(schema.users.authSub, google.sub))).toEqual([])
+  })
+})
+
+describe('bounties', () => {
+  const CREATE = `mutation($input: CreateBountyInput!) { createBounty(input: $input) { checkoutUrl bounty { id status } } }`
+  const PAY = `mutation($id: ID!, $outcome: String) { sandboxCompleteCheckout(id: $id, outcome: $outcome) { id status fundedAt expiresAt } }`
+  const BOARD = `query($honoured: Boolean) { bounties(first: 20, honoured: $honoured) { edges { node { id title status claimCount } } } }`
+  const GET = `query($id: ID!) { bounty(id: $id) { id status isExpired viewerIsPoster claimCount claims { id status } viewerClaim { id status } events { kind byAdmin note } } }`
+  const CONFIRM = `mutation($id: ID!, $note: String) { confirmClaim(id: $id, note: $note) { id status cooldownUntil } }`
+  const DECIDE = `mutation($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) { decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) { id status decisionReason } }`
+  const CLAIM = `mutation($bountyId: ID!, $input: SubmitClaimInput!) { submitClaim(bountyId: $bountyId, input: $input) { id status } }`
+  const property = {
+    kind: 'PROPERTY',
+    title: 'Red Honda Fit, CA 11-22, taken from Mill Street',
+    body: 'Taken from outside my flat on Mill Street on Tuesday night. Red Honda Fit with a roof rack and a dent on the bonnet. Reported at Gardens SAPS.',
+    amountCents: 100000,
+    durationDays: 30,
+    termsAccepted: true,
+  }
+  const claimBody = 'I gave a statement at Gardens SAPS on Wednesday about where the car was parked; Const Naidoo added it to the case and gave me a receipt.'
+  const seeded = async (prefix: string) => (await handle.db.select().from(schema.bounties)).find((b) => b.title.startsWith(prefix))!
+  const titles = (result: GqlResult<{ bounties: { edges: Array<{ node: { title: string } }> } }>) => result.data.bounties.edges.map((e) => e.node.title.split(',')[0])
+  const code = (result: GqlResult<unknown>) => result.errors?.[0]?.extensions.code
+  /** A posted bounty, paid for, on the board. */
+  const funded = async (as: string, input: Record<string, unknown> = property) => {
+    const { data, errors } = await gql(CREATE, { input }, as)
+    expect(errors).toBeUndefined()
+    const id = data.createBounty.bounty.id as string
+    await gql(PAY, { id }, as)
+    return id
+  }
+
+  it('shows open bounties on the board, honoured ones on their own, and nothing unpaid or under review', async () => {
+    expect(titles(await gql(BOARD)).sort()).toEqual(['Information on the Harbor Avenue camera vandalism', 'Silver 2016 Toyota Corolla'])
+    expect(titles(await gql(BOARD, { honoured: true }))).toEqual(['Black Giant hybrid bicycle taken from the Gardens station rack'])
+    // Under review: only its poster and admins can open it.
+    const missing = await seeded('Missing:')
+    expect((await gql(GET, { id: missing.id })).data.bounty).toBeNull()
+    expect((await gql(GET, { id: missing.id }, 'thandi_m')).data.bounty.status).toBe('PENDING_REVIEW')
+    expect((await gql(GET, { id: missing.id }, 'civicone')).data.bounty.status).toBe('PENDING_REVIEW')
+  })
+
+  it('creates a bounty, holds the money once the checkout settles, and lists it', async () => {
+    const { data } = await gql(CREATE, { input: property }, 'alexm')
+    expect(data.createBounty.bounty.status).toBe('PENDING_PAYMENT')
+    expect(data.createBounty.checkoutUrl).toContain('sandbox=1')
+    const id = data.createBounty.bounty.id
+    expect(titles(await gql(BOARD))).not.toContain('Red Honda Fit')
+
+    const paid = await gql(PAY, { id }, 'alexm')
+    expect(paid.data.sandboxCompleteCheckout.status).toBe('OPEN')
+    expect(paid.data.sandboxCompleteCheckout.fundedAt).not.toBeNull()
+    expect(Date.parse(paid.data.sandboxCompleteCheckout.expiresAt) - Date.parse(paid.data.sandboxCompleteCheckout.fundedAt)).toBe(30 * 24 * 60 * 60_000)
+    // Paying twice can't fund twice.
+    expect((await gql(PAY, { id }, 'alexm')).data.sandboxCompleteCheckout.status).toBe('OPEN')
+    const [bounty] = await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, id))
+    expect(bounty).toMatchObject({ depositedCents: 100000, releasedCents: 0, refundedCents: 0 })
+    const ledger = await handle.db.select().from(schema.ledgerEntries).where(eq(schema.ledgerEntries.bountyId, id))
+    expect(ledger.map((e) => [e.type, e.status, e.amountCents])).toEqual([['DEPOSIT', 'SETTLED', 100000]])
+    expect(titles(await gql(BOARD))).toContain('Red Honda Fit')
+  })
+
+  it('refuses bounties that break the rules, with a message the form can show', async () => {
+    const refused = async (input: Record<string, unknown>, message: RegExp) => {
+      const result = await gql(CREATE, { input: { ...property, ...input } }, 'alexm')
+      expect(code(result)).toBe('BAD_USER_INPUT')
+      expect(result.errors?.[0]?.message).toMatch(message)
+    }
+    await refused({ title: 'Find @jordan_o, he took my car' }, /Don’t name anyone/)
+    await refused({ amountCents: 5000 }, /minimum bounty/)
+    await refused({ amountCents: 123456 }, /Whole rands/)
+    await refused({ body: `${property.body} My ID is 8001015009087.` }, /ID and card numbers/)
+    await refused({ kind: 'MISSING_PERSON', relationship: 'Sister' }, /needs the SAPS case number/)
+    await refused({ kind: 'MISSING_PERSON', relationship: 'Sister', sapsCaseNumber: 'CAS 5/11/2026', durationDays: 60 }, /at most 30 days/)
+    await refused({ kind: 'MISSING_PERSON', relationship: 'Sister', sapsCaseNumber: 'CAS 5/11/2026', body: 'Last seen at 14 Mill Street, Gardens, on Sunday afternoon wearing a grey hoodie and black jeans.' }, /address/)
+    expect(code(await gql(CREATE, { input: property }))).toBe('UNAUTHENTICATED')
+    // Three open at a time.
+    for (let i = 0; i < 3; i++) await funded('alexm', { ...property, title: `${property.title} ${i}` })
+    expect((await gql(CREATE, { input: property }, 'alexm')).errors?.[0]?.message).toMatch(/3 bounties open/)
+  })
+
+  it('pays the claimant once the poster confirms, the cooling-off passes and an admin verifies', async () => {
+    const harbor = await seeded('Information on the Harbor')
+    const { claims } = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty
+    expect(claims).toHaveLength(1)
+    const claimId = claims[0].id as string
+    // Only the poster sees claims; the claimant sees their own.
+    expect((await gql(GET, { id: harbor.id }, 'thandi_m')).data.bounty).toMatchObject({ claims: [], viewerClaim: null, claimCount: 1 })
+    expect((await gql(GET, { id: harbor.id }, 'jordan_o')).data.bounty.viewerClaim.id).toBe(claimId)
+    expect(code(await gql(CONFIRM, { id: claimId }, 'alexm'))).toBe('NOT_FOUND')
+
+    const confirmed = await gql(CONFIRM, { id: claimId, note: 'Sgt Dlamini confirmed the statement is on the file.' }, 'harbor_watch')
+    expect(confirmed.data.confirmClaim.status).toBe('CONFIRMED')
+    expect(Date.parse(confirmed.data.confirmClaim.cooldownUntil) - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60_000)
+    expect((await gql(GET, { id: harbor.id })).data.bounty.status).toBe('AWAITING_VERIFICATION')
+    // Nobody else can claim now, and nobody but an admin can decide.
+    expect((await gql(CLAIM, { bountyId: harbor.id, input: { body: claimBody, attested: true } }, 'thandi_m')).errors?.[0]?.message).toMatch(/aren’t being accepted/)
+    const decision = { id: claimId, decision: 'VERIFY', reason: 'VERIFIED', note: 'Statement confirmed with the station.' }
+    expect(code(await gql(DECIDE, decision, 'harbor_watch'))).toBe('FORBIDDEN')
+    const early = await gql(DECIDE, decision, 'civicone')
+    expect(code(early)).toBe('BAD_USER_INPUT')
+    expect(early.errors?.[0]?.message).toMatch(/cooling-off/)
+
+    await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claimId))
+    const paid = await gql(DECIDE, decision, 'civicone')
+    expect(paid.errors).toBeUndefined()
+    expect(paid.data.decideClaim).toMatchObject({ status: 'PAID', decisionReason: 'VERIFIED' })
+    expect((await gql(GET, { id: harbor.id })).data.bounty.status).toBe('PAID')
+    const [bounty] = await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, harbor.id))
+    expect(bounty).toMatchObject({ depositedCents: 200000, releasedCents: 200000, refundedCents: 0, winningClaimId: claimId })
+    const ledger = await handle.db.select().from(schema.ledgerEntries).where(eq(schema.ledgerEntries.bountyId, harbor.id))
+    expect(ledger.map((e) => [e.type, e.status]).sort()).toEqual([['DEPOSIT', 'SETTLED'], ['RELEASE', 'SETTLED']])
+    // Deciding twice does nothing.
+    expect(code(await gql(DECIDE, decision, 'civicone'))).toBe('BAD_USER_INPUT')
+    // The claimant hears about it; admin actions carry no name.
+    const mine = await gql(`{ notifications(first: 10) { edges { node { kind bountyEvent actor { handle } bounty { id } } } } }`, {}, 'jordan_o')
+    const events = mine.data.notifications.edges.map((e: { node: { kind: string; bountyEvent: string | null; actor: { handle: string } | null } }) => e.node).filter((n: { kind: string }) => n.kind === 'BOUNTY')
+    expect(events.map((n: { bountyEvent: string }) => n.bountyEvent)).toEqual(expect.arrayContaining(['CLAIM_CONFIRMED', 'CLAIM_VERIFIED', 'PAID']))
+    expect(events.find((n: { bountyEvent: string }) => n.bountyEvent === 'CLAIM_VERIFIED').actor).toBeNull()
+  })
+
+  it('won’t let a poster cancel over a live claim, and lets a rejected claimant dispute', async () => {
+    const harbor = await seeded('Information on the Harbor')
+    const claimId = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].id as string
+    const CANCEL = `mutation($id: ID!) { cancelBounty(id: $id) { id status } }`
+    expect((await gql(CANCEL, { id: harbor.id }, 'harbor_watch')).errors?.[0]?.message).toMatch(/claim is waiting/)
+    const rejected = await gql(`mutation($id: ID!, $note: String!) { rejectClaim(id: $id, note: $note) { status } }`, { id: claimId, note: 'The van was mine, parked there legally.' }, 'harbor_watch')
+    expect(rejected.data.rejectClaim.status).toBe('REJECTED_BY_POSTER')
+    // Still refused: the claimant has a week to dispute, and the money must still be there.
+    expect((await gql(CANCEL, { id: harbor.id }, 'harbor_watch')).errors?.[0]?.message).toMatch(/claim is waiting/)
+    const disputed = await gql(`mutation($id: ID!, $note: String!) { disputeClaim(id: $id, note: $note) { status cooldownUntil } }`, { id: claimId, note: 'The statement receipt shows the registration; please check with the station.' }, 'jordan_o')
+    expect(disputed.data.disputeClaim.status).toBe('DISPUTED')
+    // Paying over the poster's head is an override, recorded as one.
+    await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claimId))
+    expect((await gql(DECIDE, { id: claimId, decision: 'VERIFY', reason: 'VERIFIED', note: 'Checked.' }, 'civicone')).errors?.[0]?.message).toMatch(/override/)
+    const paid = await gql(DECIDE, { id: claimId, decision: 'VERIFY', reason: 'ADMIN_OVERRIDE', note: 'The station confirmed the statement led to the arrest.' }, 'civicone')
+    expect(paid.data.decideClaim).toMatchObject({ status: 'PAID', decisionReason: 'ADMIN_OVERRIDE' })
+  })
+
+  it('refunds the poster when a bounty is cancelled, expired or declined', async () => {
+    const corolla = await seeded('Silver 2016')
+    const cancelled = await gql(`mutation($id: ID!) { cancelBounty(id: $id) { id status } }`, { id: corolla.id }, 'jordan_o')
+    expect(cancelled.data.cancelBounty.status).toBe('CANCELLED')
+    const [after] = await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, corolla.id))
+    expect(after).toMatchObject({ depositedCents: 500000, refundedCents: 500000, releasedCents: 0 })
+    expect(titles(await gql(BOARD))).not.toContain('Silver 2016 Toyota Corolla')
+
+    // Missing-person bounties wait for an admin; declining refunds.
+    const missing = await seeded('Missing:')
+    expect(code(await gql(`mutation($id: ID!, $note: String!) { approveBounty(id: $id, note: $note) { status } }`, { id: missing.id, note: 'ok' }, 'thandi_m'))).toBe('FORBIDDEN')
+    const declined = await gql(`mutation($id: ID!, $note: String!) { declineBounty(id: $id, note: $note) { status } }`, { id: missing.id, note: 'No case number could be confirmed with Woodstock SAPS.' }, 'civicone')
+    expect(declined.data.declineBounty.status).toBe('CANCELLED')
+    const [refunded] = await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, missing.id))
+    expect(refunded.refundedCents).toBe(300000)
+
+    // A new missing-person bounty is approved onto the board.
+    const id = await funded('alexm', {
+      kind: 'MISSING_PERSON',
+      title: 'Missing: my sister Naledi, 24, last seen in Gardens on 1 November',
+      body: 'Naledi left for work on Saturday morning and hasn’t been in touch. Grey coat, blue backpack. Reported at Gardens SAPS; please call 10111 if you see her.',
+      amountCents: 150000,
+      durationDays: 30,
+      sapsCaseNumber: 'CAS 5/11/2026',
+      relationship: 'Sister',
+      termsAccepted: true,
+    })
+    expect((await gql(GET, { id }, 'alexm')).data.bounty.status).toBe('PENDING_REVIEW')
+    const approved = await gql(`mutation($id: ID!, $note: String!) { approveBounty(id: $id, note: $note) { status } }`, { id, note: 'Case confirmed with Gardens SAPS.' }, 'civicone')
+    expect(approved.data.approveBounty.status).toBe('OPEN')
+  })
+
+  it('sweeps: abandons unpaid checkouts, expires and refunds, and escalates claims a poster ignores', async () => {
+    const SWEEP = `mutation { sweepBounties { abandoned expired escalated } }`
+    const { data } = await gql(CREATE, { input: property }, 'alexm')
+    const draft = data.createBounty.bounty.id
+    await handle.db.update(schema.bounties).set({ createdAt: new Date(Date.now() - 25 * 60 * 60_000) }).where(eq(schema.bounties.id, draft))
+    const corolla = await seeded('Silver 2016')
+    await handle.db.update(schema.bounties).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(schema.bounties.id, corolla.id))
+    const harbor = await seeded('Information on the Harbor')
+    await handle.db.update(schema.bountyClaims).set({ createdAt: new Date(Date.now() - 15 * 24 * 60 * 60_000) }).where(eq(schema.bountyClaims.bountyId, harbor.id))
+
+    expect(code(await gql(SWEEP, {}, 'alexm'))).toBe('FORBIDDEN')
+    const swept = await gql(SWEEP, {}, 'civicone')
+    expect(swept.data.sweepBounties).toMatchObject({ abandoned: 1, expired: 1, escalated: 1 })
+    expect((await gql(GET, { id: draft }, 'alexm')).data.bounty.status).toBe('ABANDONED')
+    const [expired] = await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, corolla.id))
+    expect(expired).toMatchObject({ status: 'EXPIRED', refundedCents: 500000 })
+    expect((await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].status).toBe('DISPUTED')
+  })
+
+  it('keeps the money honest in the database itself', async () => {
+    // Drizzle wraps database errors; the constraint name is on the cause.
+    const failsWith = async (promise: Promise<unknown>, pattern: RegExp) => {
+      const error = await promise.then(() => null, (e: unknown) => e)
+      const messages: string[] = []
+      for (let current: unknown = error; current; current = (current as { cause?: unknown }).cause) messages.push(String((current as Error).message))
+      expect(messages.join(' | ')).toMatch(pattern)
+    }
+    const bicycle = await seeded('Black Giant')
+    const release = (await handle.db.select().from(schema.ledgerEntries).where(eq(schema.ledgerEntries.bountyId, bicycle.id))).find((e) => e.type === 'RELEASE')!
+    await failsWith(handle.db.update(schema.ledgerEntries).set({ amountCents: 1 }).where(eq(schema.ledgerEntries.id, release.id)), /cannot be changed/)
+    await failsWith(handle.db.delete(schema.ledgerEntries).where(eq(schema.ledgerEntries.id, release.id)), /cannot be deleted/)
+    await failsWith(handle.db.insert(schema.ledgerEntries).values({ ...release, id: undefined, reference: 'rel-again', idempotencyKey: 'release:again', createdAt: undefined }), /ledger_one_release_idx/)
+    await failsWith(handle.db.update(schema.bounties).set({ releasedCents: 80001 }).where(eq(schema.bounties.id, bicycle.id)), /bounties_money_balanced/)
+  })
+
+  it('verifies webhook signatures and ignores redelivered events', async () => {
+    const provider = paystackProvider('sk_test_secret')
+    const body = Buffer.from(JSON.stringify({ event: 'charge.success', data: { id: 42, reference: 'dep-x-1', amount: 100000 } }))
+    const signature = createHmac('sha512', 'sk_test_secret').update(body).digest('hex')
+    expect(provider.parseWebhook(body, signature)).toMatchObject({ type: 'CHARGE_SUCCESS', reference: 'dep-x-1', eventKey: 'charge.success:42' })
+    expect(provider.parseWebhook(body, signature.replace(/^./, 'f'))).toBeNull()
+    expect(provider.parseWebhook(body, undefined)).toBeNull()
+    expect(provider.parseWebhook(Buffer.from(JSON.stringify({ event: 'transfer.failed', data: { id: 7, reference: 'rel-y-1', transfer_code: 'TRF_1' } })), createHmac('sha512', 'sk_test_secret').update(Buffer.from(JSON.stringify({ event: 'transfer.failed', data: { id: 7, reference: 'rel-y-1', transfer_code: 'TRF_1' } }))).digest('hex'))).toMatchObject({ type: 'TRANSFER', status: 'FAILED', providerRef: 'TRF_1' })
+
+    const ctx = { db: handle.db, payments }
+    expect(await handleProviderEvent(ctx, { type: 'IGNORED', eventKey: 'evt-1', eventType: 'subscription.create' }, '{}')).toBe('IGNORED')
+    expect(await handleProviderEvent(ctx, { type: 'IGNORED', eventKey: 'evt-1', eventType: 'subscription.create' }, '{}')).toBe('DUPLICATE')
+  })
+
+  it('links one bank account to one person, and payouts wait for a new account', async () => {
+    const SET = `mutation($input: PayoutAccountInput!) { setPayoutAccount(input: $input) { bankName accountLast4 readyAt } }`
+    const set = await gql(SET, { input: { bankCode: '250655', accountNumber: '62 123 456 789', accountName: 'Thandi Mokoena' } }, 'thandi_m')
+    expect(set.data.setPayoutAccount).toMatchObject({ bankName: 'FNB', accountLast4: '6789' })
+    expect(Date.parse(set.data.setPayoutAccount.readyAt) - Date.now()).toBeGreaterThan(71 * 60 * 60_000)
+    expect((await gql(SET, { input: { bankCode: '250655', accountNumber: '62123456789', accountName: 'A Morgan' } }, 'alexm')).errors?.[0]?.message).toMatch(/already linked/)
+    expect(code(await gql(SET, { input: { bankCode: '000000', accountNumber: '123456', accountName: 'X' } }, 'alexm'))).toBe('BAD_USER_INPUT')
+
+    // Thandi claims a bounty and is confirmed, but her account is too new to be paid.
+    const id = await funded('alexm')
+    const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    expect(code(await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m'))).toBe('BAD_USER_INPUT')
+    await gql(CONFIRM, { id: claim.id }, 'alexm')
+    await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claim.id))
+    expect((await gql(DECIDE, { id: claim.id, decision: 'VERIFY', reason: 'VERIFIED', note: 'ok' }, 'civicone')).errors?.[0]?.message).toMatch(/on hold until/)
+  })
+
+  it('blocks deleting an account while money is held for it', async () => {
+    const DELETE = `mutation($handle: String!) { deleteAccount(handle: $handle) }`
+    const blocked = await gql(DELETE, { handle: 'jordan_o' }, 'jordan_o')
+    expect(code(blocked)).toBe('BAD_USER_INPUT')
+    expect(blocked.errors?.[0]?.extensions.bountyIds).toHaveLength(1)
+    const corolla = await seeded('Silver 2016')
+    await gql(`mutation($id: ID!) { cancelBounty(id: $id) { id } }`, { id: corolla.id }, 'jordan_o')
+    expect((await gql(DELETE, { handle: 'jordan_o' }, 'jordan_o')).data.deleteAccount).toBe(true)
+    // The money records outlive the account.
+    const bicycle = await seeded('Black Giant')
+    expect((await gql(GET, { id: bicycle.id })).data.bounty.status).toBe('PAID')
+    const [claim] = await handle.db.select().from(schema.bountyClaims).where(eq(schema.bountyClaims.bountyId, bicycle.id))
+    expect(claim.claimantId).toBeNull()
+  })
+
+  it('never hands an admin handle to a new sign-in', async () => {
+    const { resolveViewer: resolve } = await import('../src/data/users')
+    const user = await resolve(handle.db, { kind: 'cognito', sub: 'c0ffee00-0000-4000-8000-00000000beef', email: 'civicone@evil.test', name: 'Imposter' }, undefined, new Set(['civicone']))
+    expect(user?.handle).toMatch(/^civicone\d{4}$/)
+    expect((await gql(`{ viewer { viewerIsAdmin } }`, {}, 'civicone')).data.viewer.viewerIsAdmin).toBe(true)
+    expect((await gql(`{ viewer { viewerIsAdmin } }`, {}, 'alexm')).data.viewer.viewerIsAdmin).toBe(false)
   })
 })

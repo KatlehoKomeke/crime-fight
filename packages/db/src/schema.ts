@@ -1,6 +1,19 @@
-import { ALERT_SEVERITIES, POST_KINDS, USER_ROLES } from '@civic/core'
+import {
+  ALERT_SEVERITIES,
+  BOUNTY_EVENT_KINDS,
+  BOUNTY_KINDS,
+  BOUNTY_REPORT_REASONS,
+  BOUNTY_STATUSES,
+  CLAIM_DECISION_REASONS,
+  CLAIM_STATUSES,
+  LEDGER_STATUSES,
+  LEDGER_TYPES,
+  PAYOUT_ACCOUNT_STATUSES,
+  POST_KINDS,
+  USER_ROLES,
+} from '@civic/core'
 import { type SQL, sql } from 'drizzle-orm'
-import { type AnyPgColumn, check, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 /*
  * One generated column is deliberately NOT declared here and lives in
@@ -203,8 +216,245 @@ export const messages = pgTable(
   (t) => [index('messages_conversation_idx').on(t.conversationId, t.createdAt.desc(), t.id.desc())],
 )
 
+/*
+ * Bounties. Money is tracked twice on purpose: every movement is a ledger row
+ * (what the provider was asked to do and whether it settled), and the bounty
+ * carries running totals under a CHECK, so what is released plus what is
+ * refunded can never exceed what was paid in. People are `set null` on
+ * deletion: financial records outlive accounts (docs/adr/0006-bounties.md).
+ */
+export const bounties = pgTable(
+  'bounties',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    posterId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    /** The post reporting the crime, if the bounty was raised from one. */
+    postId: uuid().references(() => posts.id, { onDelete: 'set null' }),
+    kind: text({ enum: BOUNTY_KINDS }).notNull(),
+    status: text({ enum: BOUNTY_STATUSES }).notNull().default('PENDING_PAYMENT'),
+    /** Where to go back to when an admin unfreezes. */
+    frozenFromStatus: text({ enum: BOUNTY_STATUSES }),
+    title: text().notNull(),
+    body: text().notNull(),
+    area: text(),
+    /** "CAS 123/11/2026", normalised. Public on missing-person bounties, members-only otherwise. */
+    sapsCaseNumber: text(),
+    /** Missing person only: how the poster knows the person. */
+    relationship: text(),
+    amountCents: integer().notNull(),
+    platformFeeCents: integer().notNull().default(0),
+    vatCents: integer().notNull().default(0),
+    currency: text().notNull().default('ZAR'),
+    depositedCents: integer().notNull().default(0),
+    releasedCents: integer().notNull().default(0),
+    refundedCents: integer().notNull().default(0),
+    durationDays: integer().notNull(),
+    /** The poster's email at creation: Paystack needs one for checkout. */
+    payerEmail: text(),
+    termsAcceptedAt: ts().notNull(),
+    fundedAt: ts(),
+    expiresAt: ts(),
+    expiringNotifiedAt: ts(),
+    closedAt: ts(),
+    winningClaimId: uuid(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check('bounties_kind_valid', oneOf(t.kind, BOUNTY_KINDS)),
+    check('bounties_status_valid', oneOf(t.status, BOUNTY_STATUSES)),
+    check('bounties_frozen_from_valid', oneOf(t.frozenFromStatus, BOUNTY_STATUSES)),
+    check('bounties_amount_positive', sql`${t.amountCents} > 0`),
+    check('bounties_money_balanced', sql`${t.releasedCents} + ${t.refundedCents} <= ${t.depositedCents}`),
+    index('bounties_board_idx')
+      .on(t.createdAt.desc(), t.id.desc())
+      .where(sql`${t.status} in ('OPEN', 'AWAITING_VERIFICATION', 'RELEASING', 'PAID')`),
+    index('bounties_poster_idx').on(t.posterId, t.createdAt.desc()),
+    index('bounties_post_idx').on(t.postId),
+    index('bounties_status_idx').on(t.status, t.expiresAt),
+  ],
+)
+
+export const bountyClaims = pgTable(
+  'bounty_claims',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    bountyId: uuid()
+      .notNull()
+      .references(() => bounties.id, { onDelete: 'cascade' }),
+    claimantId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    status: text({ enum: CLAIM_STATUSES }).notNull().default('SUBMITTED'),
+    body: text().notNull(),
+    /** Up to three https links, one per line, shown as text. */
+    links: text().notNull().default(''),
+    /** The poster's reason for rejecting, or note when confirming. */
+    posterNote: text(),
+    /** The claimant's dispute of a rejection. */
+    disputeNote: text(),
+    decisionReason: text({ enum: CLAIM_DECISION_REASONS }),
+    decisionNote: text(),
+    decidedById: uuid().references(() => users.id, { onDelete: 'set null' }),
+    /** What the admin saw before deciding, as JSON text (see ReleasePreflight). */
+    preflight: text(),
+    attestedAt: ts().notNull(),
+    confirmedAt: ts(),
+    /** Earliest an admin may verify: the kind's cooling-off after confirmation. */
+    cooldownUntil: ts(),
+    rejectedAt: ts(),
+    disputedAt: ts(),
+    decidedAt: ts(),
+    /** The account the payout went to; kept so a dispute can be traced. */
+    payoutAccountId: uuid(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check('bounty_claims_status_valid', oneOf(t.status, CLAIM_STATUSES)),
+    check('bounty_claims_reason_valid', oneOf(t.decisionReason, CLAIM_DECISION_REASONS)),
+    index('bounty_claims_bounty_idx').on(t.bountyId, t.createdAt),
+    index('bounty_claims_claimant_idx').on(t.claimantId, t.createdAt.desc()),
+    // One live claim per person per bounty, and at most one that wins.
+    uniqueIndex('bounty_claims_one_live_idx')
+      .on(t.bountyId, t.claimantId)
+      .where(sql`${t.status} in ('SUBMITTED', 'CONFIRMED', 'REJECTED_BY_POSTER', 'DISPUTED', 'VERIFIED', 'PAID')`),
+    uniqueIndex('bounty_claims_one_winner_idx')
+      .on(t.bountyId)
+      .where(sql`${t.status} in ('CONFIRMED', 'VERIFIED', 'PAID')`),
+  ],
+)
+
+export const ledgerEntries = pgTable(
+  'ledger_entries',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    bountyId: uuid()
+      .notNull()
+      .references(() => bounties.id, { onDelete: 'restrict' }),
+    claimId: uuid().references(() => bountyClaims.id, { onDelete: 'set null' }),
+    /** Who paid (deposit, refund) or is paid (release). */
+    userId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    type: text({ enum: LEDGER_TYPES }).notNull(),
+    status: text({ enum: LEDGER_STATUSES }).notNull().default('PENDING'),
+    amountCents: integer().notNull(),
+    currency: text().notNull().default('ZAR'),
+    provider: text().notNull(),
+    /** Our reference, which the provider echoes back (Paystack reference / transfer reference). */
+    reference: text().notNull().unique(),
+    /** The provider's id for it: transaction id, transfer code, refund id. */
+    providerRef: text(),
+    providerFeeCents: integer(),
+    /** Deterministic, e.g. `release:<claim id>`, so a retried step never moves money twice. */
+    idempotencyKey: text().notNull().unique(),
+    note: text(),
+    createdAt: createdAt(),
+    settledAt: ts(),
+  },
+  (t) => [
+    check('ledger_type_valid', oneOf(t.type, LEDGER_TYPES)),
+    check('ledger_status_valid', oneOf(t.status, LEDGER_STATUSES)),
+    check('ledger_amount_positive', sql`${t.amountCents} > 0`),
+    index('ledger_bounty_idx').on(t.bountyId, t.createdAt),
+    index('ledger_pending_idx').on(t.status, t.createdAt).where(sql`${t.status} = 'PENDING'`),
+    // One payout and one live deposit per bounty, enforced by the database rather than by code paths.
+    uniqueIndex('ledger_one_release_idx')
+      .on(t.bountyId)
+      .where(sql`${t.type} = 'RELEASE' and ${t.status} in ('PENDING', 'SETTLED')`),
+    uniqueIndex('ledger_one_live_deposit_idx')
+      .on(t.bountyId)
+      .where(sql`${t.type} = 'DEPOSIT' and ${t.status} in ('PENDING', 'SETTLED')`),
+  ],
+)
+
+/** Every provider event we've handled, so a redelivered webhook is a no-op. */
+export const paymentEvents = pgTable(
+  'payment_events',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    provider: text().notNull(),
+    /** The provider's event id, or a hash of the body when it has none. */
+    eventKey: text().notNull(),
+    eventType: text().notNull(),
+    reference: text(),
+    outcome: text().notNull().default('RECEIVED'),
+    payload: text().notNull(),
+    receivedAt: createdAt(),
+  },
+  (t) => [uniqueIndex('payment_events_key_idx').on(t.provider, t.eventKey)],
+)
+
+export const payoutAccounts = pgTable(
+  'payout_accounts',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    provider: text().notNull(),
+    recipientCode: text().notNull(),
+    bankCode: text().notNull(),
+    bankName: text().notNull(),
+    accountName: text().notNull(),
+    accountLast4: text().notNull(),
+    /** HMAC of bank code + account number: one bank account may back one person, without storing the number. */
+    fingerprint: text().notNull(),
+    status: text({ enum: PAYOUT_ACCOUNT_STATUSES }).notNull().default('ACTIVE'),
+    createdAt: createdAt(),
+    replacedAt: ts(),
+  },
+  (t) => [
+    check('payout_accounts_status_valid', oneOf(t.status, PAYOUT_ACCOUNT_STATUSES)),
+    uniqueIndex('payout_accounts_one_active_idx').on(t.userId).where(sql`${t.status} = 'ACTIVE'`),
+    uniqueIndex('payout_accounts_fingerprint_idx').on(t.fingerprint).where(sql`${t.status} = 'ACTIVE'`),
+  ],
+)
+
+/** The audit trail: public ones make the Activity list, and the ones addressed to someone make their notifications. */
+export const bountyEvents = pgTable(
+  'bounty_events',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    bountyId: uuid()
+      .notNull()
+      .references(() => bounties.id, { onDelete: 'cascade' }),
+    claimId: uuid().references(() => bountyClaims.id, { onDelete: 'set null' }),
+    kind: text({ enum: BOUNTY_EVENT_KINDS }).notNull(),
+    /** Who did it; null for the system. Admin actions are shown as CIVIC/ONE, never by name. */
+    actorId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    byAdmin: boolean().notNull().default(false),
+    /** Who should hear about it; null for events nobody is told about. The record outlives the account. */
+    recipientId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    /** Shown on the public Activity trail. */
+    isPublic: boolean().notNull().default(false),
+    note: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check('bounty_events_kind_valid', oneOf(t.kind, BOUNTY_EVENT_KINDS)),
+    index('bounty_events_bounty_idx').on(t.bountyId, t.createdAt),
+    index('bounty_events_recipient_idx').on(t.recipientId, t.createdAt.desc()),
+  ],
+)
+
+export const bountyReports = pgTable(
+  'bounty_reports',
+  {
+    bountyId: uuid()
+      .notNull()
+      .references(() => bounties.id, { onDelete: 'cascade' }),
+    reporterId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reason: text({ enum: BOUNTY_REPORT_REASONS }).notNull(),
+    note: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.bountyId, t.reporterId] }), check('bounty_reports_reason_valid', oneOf(t.reason, BOUNTY_REPORT_REASONS))],
+)
+
 export type User = typeof users.$inferSelect
 export type Post = typeof posts.$inferSelect
+export type Bounty = typeof bounties.$inferSelect
+export type BountyClaim = typeof bountyClaims.$inferSelect
+export type LedgerEntry = typeof ledgerEntries.$inferSelect
+export type PayoutAccount = typeof payoutAccounts.$inferSelect
+export type BountyEvent = typeof bountyEvents.$inferSelect
+export type BountyReport = typeof bountyReports.$inferSelect
 export type PostMedia = typeof postMedia.$inferSelect
 export type Topic = typeof topics.$inferSelect
 export type Conversation = typeof conversations.$inferSelect

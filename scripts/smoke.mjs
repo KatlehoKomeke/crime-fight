@@ -86,3 +86,10 @@ await retry('app shell query (trends + trusted sources) works', async () => {
 })
 
 console.log(`\nSmoke test passed for ${site}`)
+
+// The payment webhook route must reach the API: an unsigned body is refused by the API itself (401), or
+// 404 while no provider is configured. Anything else means CloudFront or the HTTP API isn't wired.
+await retry('payment webhook route reaches the API', async () => {
+  const res = await fetch(`${site}/payments/paystack/webhook`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+  if (res.status !== 401 && res.status !== 404) throw new Error(`status ${res.status}`)
+})

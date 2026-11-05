@@ -1,40 +1,53 @@
+import type { BountyEventKind } from '@civic/core'
 import { type Database, schema } from '@civic/db'
-import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, ne, or, type SQL, sql } from 'drizzle-orm'
 import { alias, type AnyPgColumn, unionAll } from 'drizzle-orm/pg-core'
 import { type Connection, decodeCursor, type PageArgs, pageSize, toConnection } from './pagination'
 import { filters } from './posts'
 
-const { posts, likes, reposts, follows } = schema
+const { posts, likes, reposts, follows, bountyEvents } = schema
 
-export const NOTIFICATION_KINDS = ['ALERT', 'REPLY', 'LIKE', 'REPOST', 'FOLLOW'] as const
+export const NOTIFICATION_KINDS = ['ALERT', 'REPLY', 'LIKE', 'REPOST', 'FOLLOW', 'BOUNTY'] as const
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 
 export interface Notification {
   /** The kind plus the key of the row behind it, e.g. `LIKE:<user id>:<post id>`. */
   id: string
   kind: NotificationKind
-  /** The alert's author, or whoever replied, liked, reposted or followed. */
-  actorId: string
-  /** The alert, the reply, or the viewer's post that was liked or reposted. Null for follows. */
+  /** The alert's author, or whoever replied, liked, reposted or followed. Null when CIVIC/ONE itself did something to a bounty. */
+  actorId: string | null
+  /** The alert, the reply, or the viewer's post that was liked or reposted. Null for follows and bounties. */
   postId: string | null
+  bountyId: string | null
+  bountyEvent: BountyEventKind | null
+  note: string | null
   createdAt: Date
 }
 
 const NOTIFICATION_ID = /^[A-Z]+(:[0-9a-f-]{36}){1,2}$/
 
+interface BountyColumns {
+  bountyId: AnyPgColumn
+  eventKind: AnyPgColumn
+  note: AnyPgColumn
+}
+
 /**
  * Every source selects the same columns so they can be unioned. All the
  * created_at columns share one type, so they decode like posts.created_at.
  */
-const columns = (kind: NotificationKind, key: AnyPgColumn[], actorId: AnyPgColumn, postId: AnyPgColumn | null, createdAt: AnyPgColumn) => ({
+const columns = (kind: NotificationKind, key: AnyPgColumn[], actorId: AnyPgColumn | SQL, postId: AnyPgColumn | null, createdAt: AnyPgColumn, bounty?: BountyColumns) => ({
   id: sql<string>`concat_ws(':', ${kind}::text, ${sql.join(key, sql`, `)})`.as('id'),
   kind: sql<NotificationKind>`${kind}::text`.as('kind'),
-  actorId: sql<string>`${actorId}`.as('actor_id'),
+  actorId: sql<string | null>`${actorId}`.as('actor_id'),
   postId: sql<string | null>`${postId ?? sql`null::uuid`}`.as('post_id'),
+  bountyId: sql<string | null>`${bounty?.bountyId ?? sql`null::uuid`}`.as('bounty_id'),
+  bountyEvent: sql<BountyEventKind | null>`${bounty?.eventKind ?? sql`null::text`}`.as('bounty_event'),
+  note: sql<string | null>`${bounty?.note ?? sql`null::text`}`.as('note'),
   createdAt: sql`${createdAt}`.mapWith(posts.createdAt).as('created_at'),
 })
 
-/** Replies to, likes and reposts of the viewer's posts, and new followers. Never the viewer's own actions. */
+/** Replies to, likes and reposts of the viewer's posts, new followers, and bounty events addressed to them. Never the viewer's own actions. */
 function activity(db: Database, viewerId: string) {
   const parent = alias(posts, 'parent')
   const reactions = (table: typeof likes | typeof reposts, kind: 'LIKE' | 'REPOST') =>
@@ -53,14 +66,25 @@ function activity(db: Database, viewerId: string) {
     reactions(likes, 'LIKE'),
     reactions(reposts, 'REPOST'),
     db.select(columns('FOLLOW', [follows.followerId], follows.followerId, null, follows.createdAt)).from(follows).where(eq(follows.followeeId, viewerId)),
+    db
+      // Admin actions are never attributed by name: the app shows CIVIC/ONE.
+      .select(
+        columns('BOUNTY', [bountyEvents.id], sql`case when ${bountyEvents.byAdmin} then null else ${bountyEvents.actorId} end`, null, bountyEvents.createdAt, {
+          bountyId: bountyEvents.bountyId,
+          eventKind: bountyEvents.kind,
+          note: bountyEvents.note,
+        }),
+      )
+      .from(bountyEvents)
+      .where(and(eq(bountyEvents.recipientId, viewerId), or(isNull(bountyEvents.actorId), ne(bountyEvents.actorId, viewerId)))),
   ] as const
 }
 
 /**
  * Newest-first keyset page of official alerts and advisories merged with the
  * viewer's activity. Anonymous viewers get alerts only.
- * Derived from the posts, likes, reposts and follows tables, so there is
- * nothing extra to write when someone interacts.
+ * Derived from the posts, likes, reposts, follows and bounty_events tables, so
+ * there is nothing extra to write when someone interacts.
  */
 export async function pageNotifications(
   db: Database,

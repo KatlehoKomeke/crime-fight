@@ -8,6 +8,8 @@ export const PREVIEW_PAGES = {
   explore: { title: 'Explore', description: 'Search verified local updates, topics and the trusted sources behind them.' },
   terms: { title: 'Terms of use', description: 'The rules for using CIVIC/ONE, and what you and we agree to.' },
   privacy: { title: 'Privacy policy', description: 'What CIVIC/ONE collects, why, who can see it and the choices you have.' },
+  bounties: { title: 'Bounties', description: 'Rewards for recoveries, safe returns and information to SAPS, held by CIVIC/ONE until they are honoured.' },
+  bountyRules: { title: 'How bounties work', description: 'What a bounty can be for, how it is paid, and what happens if it isn’t.' },
 } as const
 
 export type PreviewPage = keyof typeof PREVIEW_PAGES

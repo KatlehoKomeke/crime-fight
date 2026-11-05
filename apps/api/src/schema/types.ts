@@ -164,12 +164,9 @@ NotificationRef.implement({
     createdAt: t.field({ type: 'DateTime', resolve: (notification) => notification.createdAt }),
     actor: t.field({
       type: UserRef,
-      description: 'The alert’s author, or whoever replied, liked, reposted or followed.',
-      resolve: async (notification, _, ctx) => {
-        const actor = await ctx.loaders.user.load(notification.actorId)
-        if (!actor) throw new Error(`Actor ${notification.actorId} missing`)
-        return actor
-      },
+      nullable: true,
+      description: 'The alert’s author, or whoever replied, liked, reposted or followed. Null when CIVIC/ONE itself did something to a bounty.',
+      resolve: (notification, _, ctx) => (notification.actorId ? ctx.loaders.user.load(notification.actorId) : null),
     }),
     post: t.field({
       type: PostRef,

@@ -1,3 +1,5 @@
+export type PaymentsProviderName = 'disabled' | 'sandbox' | 'paystack'
+
 export interface ApiEnv {
   stage: string
   /** `dev` trusts an `x-dev-user` header (local + CI only); `cognito` verifies Cognito ID tokens. */
@@ -10,14 +12,35 @@ export interface ApiEnv {
   corsOrigins: string[]
   /** AppSync Events HTTP host for publishing inbox events; unset locally, where the dev server hosts them. */
   realtimeHost?: string
+  /**
+   * Who holds bounty money. `disabled` lists bounties read-only (prod until live
+   * keys pass the legal gate); `sandbox` is local/test only; `paystack` needs a
+   * secret key, inline locally or from Secrets Manager when deployed.
+   */
+  paymentsProvider: PaymentsProviderName
+  paystackSecretKey?: string
+  paystackSecretArn?: string
+  /** Handles (lowercase) who review bounties and release money. */
+  adminHandles: Set<string>
+  /** Where Paystack sends people back to; read from SSM when deployed (the Web stack publishes it). */
+  siteUrl?: string
+  publicConfigParam?: string
 }
 
 export function readEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
   const authMode = env.AUTH_MODE === 'cognito' ? 'cognito' : 'dev'
   const stage = env.STAGE ?? 'local'
-  if (authMode === 'dev' && (stage === 'prod' || stage === 'qa')) {
+  const deployed = stage === 'prod' || stage === 'qa'
+  if (authMode === 'dev' && deployed) {
     throw new Error(`AUTH_MODE=dev is not allowed in the ${stage} stage`)
   }
+  const raw = env.PAYMENTS_PROVIDER
+  const paymentsProvider: PaymentsProviderName = raw === 'sandbox' || raw === 'paystack' ? raw : raw === 'disabled' || deployed ? 'disabled' : 'sandbox'
+  if (paymentsProvider === 'sandbox' && deployed) throw new Error(`PAYMENTS_PROVIDER=sandbox is not allowed in the ${stage} stage`)
+  if (paymentsProvider === 'paystack' && !env.PAYSTACK_SECRET_KEY && !env.PAYSTACK_SECRET_ARN) {
+    throw new Error('PAYMENTS_PROVIDER=paystack needs PAYSTACK_SECRET_KEY or PAYSTACK_SECRET_ARN')
+  }
+  const corsOrigins = (env.CORS_ORIGINS ?? 'http://localhost:8081').split(',').filter(Boolean)
   return {
     stage,
     authMode,
@@ -25,7 +48,14 @@ export function readEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
     cognitoClientIds: (env.COGNITO_CLIENT_IDS ?? '').split(',').filter(Boolean),
     persistedOnly: env.PERSISTED_ONLY === 'true',
     graphiql: env.GRAPHIQL !== 'false' && stage !== 'prod',
-    corsOrigins: (env.CORS_ORIGINS ?? 'http://localhost:8081').split(',').filter(Boolean),
+    corsOrigins,
     realtimeHost: env.REALTIME_HTTP_HOST || undefined,
+    paymentsProvider,
+    paystackSecretKey: env.PAYSTACK_SECRET_KEY || undefined,
+    paystackSecretArn: env.PAYSTACK_SECRET_ARN || undefined,
+    // Locally the newsroom demo account reviews bounties, so the admin screens can be tried without configuration.
+    adminHandles: new Set((env.ADMIN_HANDLES ?? (deployed ? '' : 'civicone')).split(',').map((h) => h.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)),
+    siteUrl: env.SITE_URL || (deployed ? undefined : corsOrigins[0]),
+    publicConfigParam: env.PUBLIC_CONFIG_PARAM || undefined,
   }
 }

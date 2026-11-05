@@ -89,6 +89,19 @@ const applyInboxEvent = (event: InboxEventFieldsFragment | null | undefined, cac
 }
 
 /**
+ * A bounty moved (posted, paid for, claimed, decided, closed): every list it
+ * could appear in refetches the next time it's shown. Mutations return the
+ * bounty itself, so the entity is already current.
+ */
+const bountiesChanged = (cache: Cache) => {
+  for (const field of ['bounties', 'myBounties', 'myClaims', 'bountyQueue']) invalidateField(cache, 'Query', field)
+  const viewer = cache.resolve('Query', 'viewer') as string | null
+  if (!viewer) return
+  invalidateField(cache, viewer, 'bounties')
+  cache.invalidate(viewer, 'bountyCount')
+}
+
+/**
  * Normalised cache: every Post/User is stored once by id, so liking a post in
  * the feed instantly updates it on the detail page and profile too, without
  * refetching anything.
@@ -108,6 +121,15 @@ export const cacheConfig: CacheExchangeOpts = {
     MessageConnection: () => null,
     MessageEdge: () => null,
     InboxEvent: () => null,
+    BountyConnection: () => null,
+    BountyEdge: () => null,
+    BountyClaimConnection: () => null,
+    BountyClaimEdge: () => null,
+    BountyCheckout: () => null,
+    BountyReport: () => null,
+    ReleasePreflight: () => null,
+    SweepReport: () => null,
+    Bank: (bank) => bank.code as string,
   },
   resolvers: {
     Query: {
@@ -116,11 +138,16 @@ export const cacheConfig: CacheExchangeOpts = {
       search: relayPagination(),
       savedPosts: relayPagination(),
       conversations: relayPagination(),
+      bounties: relayPagination(),
+      myBounties: relayPagination(),
+      myClaims: relayPagination(),
+      bountyQueue: relayPagination(),
       post: (_parent, args) => ({ __typename: 'Post', id: args.id as string }),
+      bounty: (_parent, args) => ({ __typename: 'Bounty', id: args.id as string }),
     },
     Conversation: { messages: relayPagination() },
     Post: { replies: relayPagination() },
-    User: { posts: relayPagination(), followers: relayPagination(), following: relayPagination() },
+    User: { posts: relayPagination(), followers: relayPagination(), following: relayPagination(), bounties: relayPagination() },
     Topic: { posts: relayPagination() },
   },
   optimistic: {
@@ -164,6 +191,28 @@ export const cacheConfig: CacheExchangeOpts = {
       unfollowUser: (_result, args, cache) => followChanged(args as Args, cache),
       sendMessage: (result, _args, cache) => applyInboxEvent(result.sendMessage as InboxEventFieldsFragment, cache),
       markConversationRead: (result, _args, cache) => applyInboxEvent(result.markConversationRead as InboxEventFieldsFragment, cache),
+      createBounty: (_result, _args, cache) => bountiesChanged(cache),
+      confirmBountyPayment: (_result, _args, cache) => bountiesChanged(cache),
+      sandboxCompleteCheckout: (_result, _args, cache) => bountiesChanged(cache),
+      cancelBounty: (_result, _args, cache) => bountiesChanged(cache),
+      submitClaim: (_result, _args, cache) => bountiesChanged(cache),
+      withdrawClaim: (_result, _args, cache) => bountiesChanged(cache),
+      confirmClaim: (_result, _args, cache) => bountiesChanged(cache),
+      rejectClaim: (_result, _args, cache) => bountiesChanged(cache),
+      disputeClaim: (_result, _args, cache) => bountiesChanged(cache),
+      decideClaim: (_result, _args, cache) => bountiesChanged(cache),
+      retryBountyPayout: (_result, _args, cache) => bountiesChanged(cache),
+      approveBounty: (_result, _args, cache) => bountiesChanged(cache),
+      declineBounty: (_result, _args, cache) => bountiesChanged(cache),
+      adminCancelBounty: (_result, _args, cache) => bountiesChanged(cache),
+      freezeBounty: (_result, _args, cache) => bountiesChanged(cache),
+      unfreezeBounty: (_result, _args, cache) => bountiesChanged(cache),
+      sweepBounties: (_result, _args, cache) => bountiesChanged(cache),
+      // The mutation returns the account; the viewer's link to it is what changed.
+      setPayoutAccount: (_result, _args, cache) => {
+        const viewer = cache.resolve('Query', 'viewer') as string | null
+        if (viewer) cache.invalidate(viewer, 'payoutAccount')
+      },
     },
     Subscription: {
       inbox: (result, _args, cache) => applyInboxEvent(result.inbox as InboxEventFieldsFragment, cache),

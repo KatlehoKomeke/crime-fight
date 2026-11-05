@@ -15,7 +15,7 @@ import { useAuth } from '@/lib/auth'
 import { fonts, radius, useColors } from '@/theme'
 import { Icon } from './Icon'
 import { useToast } from './Toast'
-import { Avatar, Button, Touchable, Txt } from './ui'
+import { Avatar, Button, Chip, Txt } from './ui'
 
 interface Props {
   replyTo?: { id: string; handle: string }
@@ -160,29 +160,11 @@ export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
   )
 }
 
-function Chip({ label, selected, onPress, subtle }: { label: string; selected: boolean; onPress: () => void; subtle?: boolean }) {
-  const c = useColors()
-  return (
-    <Touchable
-      onPress={onPress}
-      accessibilityRole="radio"
-      accessibilityState={{ checked: selected }}
-      style={[styles.chip, { borderColor: selected ? c.text : c.line, backgroundColor: selected ? (subtle ? c.surfaceAlt : c.primary) : 'transparent' }]}
-      hoverStyle={{ borderColor: c.text }}
-    >
-      <Txt variant="micro" style={{ color: selected && !subtle ? c.onPrimary : c.text, textTransform: subtle ? 'capitalize' : 'uppercase', letterSpacing: subtle ? 0 : 0.8 }}>
-        {label}
-      </Txt>
-    </Touchable>
-  )
-}
-
 const styles = StyleSheet.create({
   wrap: { flexDirection: 'row', gap: 12, padding: 18 },
   compact: { paddingTop: 16, paddingBottom: 10 },
   main: { flex: 1, minWidth: 0 },
   kinds: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
-  chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1 },
   input: { fontFamily: fonts.regular, paddingVertical: 7, textAlignVertical: 'top' },
   inputCompact: { fontSize: 17, lineHeight: 24, minHeight: 52 },
   inputLarge: { fontSize: 19, lineHeight: 27, minHeight: 130 },
