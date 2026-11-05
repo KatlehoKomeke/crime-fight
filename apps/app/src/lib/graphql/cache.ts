@@ -217,6 +217,7 @@ export const cacheConfig: CacheExchangeOpts = {
       disputeClaim: (result, _args, cache) => bountyChanged(result, cache),
       decideClaim: (result, _args, cache) => bountyChanged(result, cache),
       retryBountyPayout: (result, _args, cache) => bountyChanged(result, cache),
+      retryBountyRefund: (result, _args, cache) => bountyChanged(result, cache),
       approveBounty: (result, _args, cache) => bountyChanged(result, cache),
       declineBounty: (result, _args, cache) => bountyChanged(result, cache),
       adminCancelBounty: (result, _args, cache) => bountyChanged(result, cache),

@@ -22,7 +22,7 @@ type Bounty {
   claimCount: Int!
 
   """
-  Every claim, oldest first. Poster and admins only; others get an empty list.
+  Every claim, oldest first. Poster and admins only; others get an empty list. Withdrawn claims are for admins only.
   """
   claims: [BountyClaim!]!
   closedAt: DateTime
@@ -31,7 +31,7 @@ type Bounty {
   durationDays: Int!
 
   """
-  The activity trail, oldest first: the public part for everyone, all of it for the poster and admins.
+  The activity trail, oldest first: the public part for everyone, plus what was addressed to or done by the viewer; all of it for admins.
   """
   events: [BountyEvent!]!
   expiresAt: DateTime
@@ -56,6 +56,11 @@ type Bounty {
 
   """Missing person: how the poster knows them. Poster and admins only."""
   relationship: String
+
+  """
+  Taken down: only the poster, claimants and admins can open it. Poster and admins only.
+  """
+  removedAt: DateTime
 
   """Admins only."""
   reports: [BountyReport!]!
@@ -88,6 +93,11 @@ type BountyClaim {
   body: String!
   bounty: Bounty!
   claimant: User
+
+  """
+  What the poster told the reviewer when confirming. Poster and admins only.
+  """
+  confirmNote: String
   confirmedAt: DateTime
 
   """Earliest CIVIC/ONE may release the money."""
@@ -104,6 +114,8 @@ type BountyClaim {
   Where the money goes: the claimant’s current account, or the one it went to. Admins only.
   """
   payoutAccount: PayoutAccount
+
+  """The poster’s reason for declining, which the claimant sees."""
   posterNote: String
 
   """What an admin should weigh before paying. Admins only."""
@@ -364,7 +376,10 @@ type MessageEdge {
 }
 
 type Mutation {
-  adminCancelBounty(id: ID!, note: String!): Bounty!
+  """
+  Closes and refunds a bounty from the review side. With `takeDown`, its page stays off everyone’s screen but the poster’s, claimants’ and admins’.
+  """
+  adminCancelBounty(id: ID!, note: String!, takeDown: Boolean): Bounty!
   approveBounty(id: ID!, note: String!): Bounty!
 
   """
@@ -413,7 +428,16 @@ type Mutation {
 
   """A new checkout for a bounty that hasn’t been paid for."""
   retryBountyCheckout(id: ID!): BountyCheckout!
+
+  """
+  Sends a failed payout again, to the claimant’s current account, under the same checks as the first time. Admins only.
+  """
   retryBountyPayout(id: ID!): Bounty!
+
+  """
+  Sends a refund the provider failed again, to the same card. Admins only.
+  """
+  retryBountyRefund(id: ID!): Bounty!
 
   """Sandbox only: pretends the checkout was paid (or failed)."""
   sandboxCompleteCheckout(id: ID!, outcome: String = "SUCCESS"): Bounty!
@@ -674,6 +698,9 @@ type SweepReport {
   expired: Int!
   expiring: Int!
   redriven: Int!
+
+  """Texts removed under the privacy policy’s retention periods."""
+  scrubbed: Int!
 }
 
 type Topic {

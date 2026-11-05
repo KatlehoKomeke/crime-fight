@@ -71,7 +71,8 @@ export function paystackProvider(secretKey: string): PaymentProvider {
     return json
   }
 
-  const notFound = (error: unknown) => error instanceof PaymentProviderError && error.status === 404
+  // A reference Paystack has never seen: 404 in practice, and the API reference also shows a 400 with the same wording.
+  const notFound = (error: unknown) => error instanceof PaymentProviderError && (error.status === 404 || (error.status === 400 && /not found/i.test(error.message)))
 
   return {
     name: 'paystack',
@@ -94,7 +95,9 @@ export function paystackProvider(secretKey: string): PaymentProvider {
     async verifyCheckout(reference) {
       try {
         const { data } = await call<PaystackTransaction>('GET', `/transaction/verify/${encodeURIComponent(reference)}`)
-        const status: CheckoutResult['status'] = data.status === 'success' ? 'SUCCESS' : data.status === 'failed' || data.status === 'abandoned' || data.status === 'reversed' ? 'FAILED' : 'PENDING'
+        // `abandoned` is a checkout the customer hasn't finished, and the page stays payable: not a failure. Only the
+        // bounty's own payment window ends one of those. `failed` and `reversed` are final.
+        const status: CheckoutResult['status'] = data.status === 'success' ? 'SUCCESS' : data.status === 'failed' || data.status === 'reversed' ? 'FAILED' : 'PENDING'
         return { status, amountCents: data.amount, currency: data.currency, providerRef: String(data.id), feeCents: data.fees ?? null }
       } catch (error) {
         if (notFound(error)) return null
@@ -147,6 +150,16 @@ export function paystackProvider(secretKey: string): PaymentProvider {
       return { status: refundStatus(data.status), providerRef: String(data.id) }
     },
 
+    async fetchRefund(providerRef) {
+      try {
+        const { data } = await call<PaystackRefund>('GET', `/refund/${encodeURIComponent(providerRef)}`)
+        return { status: refundStatus(data.status), providerRef: String(data.id) }
+      } catch (error) {
+        if (notFound(error)) return null
+        throw error
+      }
+    },
+
     parseWebhook(rawBody, signature) {
       if (!signature) return null
       const expected = Buffer.from(createHmac('sha512', secretKey).update(rawBody).digest('hex'))
@@ -187,8 +200,10 @@ export function paystackProvider(secretKey: string): PaymentProvider {
         case 'charge.dispute.create':
         case 'charge.dispute.remind':
         case 'charge.dispute.resolve': {
+          // The dispute carries the transaction it's about; `resolution` says how it closed (merchant-accepted, auto-accepted, declined).
           const transaction = data.transaction as { reference?: string } | undefined
-          return { type: 'CHARGEBACK', eventKey, eventType: event.event, transactionRef: transaction?.reference ?? reference, status: event.event.endsWith('resolve') ? 'RESOLVED' : 'CREATED' }
+          const status = event.event.endsWith('resolve') ? 'RESOLVED' : event.event.endsWith('remind') ? 'REMINDED' : 'CREATED'
+          return { type: 'CHARGEBACK', eventKey, eventType: event.event, transactionRef: transaction?.reference ?? reference, status, resolution: typeof data.resolution === 'string' ? data.resolution : null }
         }
         default:
           return { type: 'IGNORED', eventKey, eventType: event.event }

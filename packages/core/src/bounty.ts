@@ -167,6 +167,10 @@ export const PAYOUT_ACCOUNT_HOLD_HOURS = 72
 export const PENDING_PAYMENT_TTL_HOURS = 24
 /** Days before expiry the poster is reminded. */
 export const BOUNTY_EXPIRING_DAYS = 3
+/** Days after a missing-person bounty closes before its description is removed, as the privacy policy promises. */
+export const MISSING_PERSON_TEXT_RETENTION_DAYS = 7
+/** Days after a bounty closes before the text of its claims is removed. */
+export const CLAIM_TEXT_RETENTION_DAYS = 365
 
 export interface BountyKindRule {
   label: string

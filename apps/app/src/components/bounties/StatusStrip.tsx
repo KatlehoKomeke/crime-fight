@@ -43,7 +43,13 @@ export function StatusStrip({ bounty, poster, admin }: { bounty: BountyDetailFie
   const live = bounty.status === 'OPEN' && !bounty.isExpired
   const unpaid = bounty.status === 'PENDING_PAYMENT' && (poster || admin)
   const label = unpaid ? 'Not paid yet' : bountyStatusLabel(bounty)
-  const line = unpaid ? 'Listed once it’s paid for' : bounty.status === 'FROZEN' ? 'Being reviewed by CIVIC/ONE' : bountyStatusLine(bounty)
+  const line = unpaid
+    ? 'Listed once it’s paid for'
+    : bounty.removedAt
+      ? `${bountyStatusLine(bounty)} · Taken down: only you, its claimants and CIVIC/ONE can open it`
+      : bounty.status === 'FROZEN'
+        ? 'Being reviewed by CIVIC/ONE'
+        : bountyStatusLine(bounty)
 
   return (
     <View style={[styles.strip, { borderColor: c.line, borderLeftColor: tone, backgroundColor: c.bg }]} accessibilityRole="summary">

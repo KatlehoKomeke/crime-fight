@@ -1,4 +1,5 @@
 import {
+  BOUNTY_CLOSED_STATUSES,
   BOUNTY_EXPIRING_DAYS,
   BOUNTY_FUNDED_STATUSES,
   BOUNTY_HELD_MAX_CENTS,
@@ -10,14 +11,17 @@ import {
   type BountyStatus,
   bountyExpiresAt,
   checkPrivacy,
+  CLAIM_DECISION_LABEL,
   CLAIM_DISPUTE_DAYS,
   CLAIM_LIVE_STATUSES,
   CLAIM_POSTER_RESPONSE_DAYS,
+  CLAIM_TEXT_RETENTION_DAYS,
   CLAIMS_PER_DAY_MAX,
   claimCooldownEnds,
   type ClaimDecisionReason,
   type ClaimStatus,
   formatZar,
+  MISSING_PERSON_TEXT_RETENTION_DAYS,
   normaliseCaseNumber,
   PAYOUT_ACCOUNT_HOLD_HOURS,
   payoutAccountReadyAt,
@@ -31,7 +35,7 @@ import { createHmac } from 'node:crypto'
 import { z } from 'zod'
 import { apiError } from '../errors'
 import type { Payments } from '../payments'
-import type { CheckoutResult, PaymentProvider, ProviderEvent, RefundStatus, TransferStatus } from '../payments/types'
+import { type CheckoutResult, type PaymentProvider, PaymentProviderError, type ProviderEvent, type RefundStatus, type TransferResult, type TransferStatus } from '../payments/types'
 import { type Connection, decodeCursor, type PageArgs, pageSize, toConnection } from './pagination'
 
 const { bounties, bountyClaims, ledgerEntries, paymentEvents, payoutAccounts, bountyEvents, bountyReports, users, posts, likes, follows } = schema
@@ -61,6 +65,7 @@ const forbidden = (message: string) => apiError('FORBIDDEN', message)
 
 const FUNDED = [...BOUNTY_FUNDED_STATUSES]
 const LISTED = [...BOUNTY_LISTED_STATUSES]
+const CLOSED = [...BOUNTY_CLOSED_STATUSES]
 const LIVE_CLAIMS = [...CLAIM_LIVE_STATUSES]
 const hours = (n: number) => n * 60 * 60_000
 const days = (n: number) => hours(24 * n)
@@ -145,23 +150,25 @@ export async function createBounty(ctx: MoneyContext, poster: User, raw: CreateB
   const email = poster.email ?? (provider.name === 'sandbox' ? `${poster.handle}@sandbox.invalid` : null)
   if (!email) throw badInput('Your account has no email address, which the payment provider needs. Sign in with a provider that shares one.')
 
-  if (input.postId) {
-    const [post] = await ctx.db.select({ id: posts.id }).from(posts).where(and(eq(posts.id, input.postId), eq(posts.authorId, poster.id), isNull(posts.replyToId), isNull(posts.deletedAt)))
-    if (!post) throw badInput('You can only attach a bounty to your own update.')
-    const [existing] = await ctx.db.select({ id: bounties.id }).from(bounties).where(and(eq(bounties.postId, input.postId), inArray(bounties.status, [...FUNDED, 'PENDING_PAYMENT'])))
-    if (existing) throw badInput('That update already has a bounty.')
-  }
-
-  const [open] = await ctx.db
-    .select({ n: count(), held: sql<number>`coalesce(sum(case when ${bounties.status} in ('PENDING_PAYMENT') then 0 else ${bounties.amountCents} end), 0)::int` })
-    .from(bounties)
-    .where(and(eq(bounties.posterId, poster.id), inArray(bounties.status, [...FUNDED, 'PENDING_PAYMENT'])))
-  if ((open?.n ?? 0) >= BOUNTY_OPEN_MAX_PER_POSTER) throw badInput(`You can have ${BOUNTY_OPEN_MAX_PER_POSTER} bounties open at a time. Cancel or wait for one to close first.`)
-  if ((open?.held ?? 0) + input.amountCents > BOUNTY_HELD_MAX_CENTS) {
-    throw badInput(`CIVIC/ONE holds at most ${formatZar(BOUNTY_HELD_MAX_CENTS)} for one person at a time.`)
-  }
-
   const bounty = await ctx.db.transaction(async (tx) => {
+    // The caps are checked and the row written under one lock on the poster, so two requests can't both squeeze under them.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, poster.id)).for('update')
+    if (input.postId) {
+      const [post] = await tx.select({ id: posts.id }).from(posts).where(and(eq(posts.id, input.postId), eq(posts.authorId, poster.id), isNull(posts.replyToId), isNull(posts.deletedAt)))
+      if (!post) throw badInput('You can only attach a bounty to your own update.')
+      const [existing] = await tx.select({ id: bounties.id }).from(bounties).where(and(eq(bounties.postId, input.postId), inArray(bounties.status, [...FUNDED, 'PENDING_PAYMENT'])))
+      if (existing) throw badInput('That update already has a bounty.')
+    }
+    // Unpaid bounties count towards both caps: they can all be paid for a moment later.
+    const [open] = await tx
+      .select({ n: count(), held: sql<number>`coalesce(sum(${bounties.amountCents}), 0)::int` })
+      .from(bounties)
+      .where(and(eq(bounties.posterId, poster.id), inArray(bounties.status, [...FUNDED, 'PENDING_PAYMENT'])))
+    if ((open?.n ?? 0) >= BOUNTY_OPEN_MAX_PER_POSTER) throw badInput(`You can have ${BOUNTY_OPEN_MAX_PER_POSTER} bounties open at a time. Cancel or wait for one to close first.`)
+    if ((open?.held ?? 0) + input.amountCents > BOUNTY_HELD_MAX_CENTS) {
+      throw badInput(`CIVIC/ONE holds at most ${formatZar(BOUNTY_HELD_MAX_CENTS)} for one person at a time, counting bounties not paid for yet.`)
+    }
+
     const [row] = await tx
       .insert(bounties)
       .values({
@@ -228,12 +235,15 @@ export async function retryCheckout(ctx: MoneyContext, poster: User, bountyId: s
     // They may have paid after all; never open a second checkout for money already taken.
     const verified = await provider.verifyCheckout(live.reference)
     if (verified?.status === 'SUCCESS') return { bounty: await settleDeposit(ctx, live.reference, verified), checkoutUrl: null }
-    if (verified?.status === 'PENDING' && live.provider === provider.name) {
-      // Paystack keeps a reference for the first checkout; a new session needs a new one.
-      await ctx.db.update(ledgerEntries).set({ status: 'FAILED', note: 'Replaced by a new checkout' }).where(eq(ledgerEntries.id, live.id))
-    } else if (verified?.status === 'FAILED' || !verified) {
-      await ctx.db.update(ledgerEntries).set({ status: 'FAILED', note: 'Checkout not completed' }).where(eq(ledgerEntries.id, live.id))
-    }
+    // Not paid (or never seen by the provider): close this checkout and open a fresh one. The old page may still be
+    // payable; a payment there lands on its own reference, and settleDeposit takes a late one in.
+    const [closed] = await ctx.db
+      .update(ledgerEntries)
+      .set({ status: 'FAILED', note: verified ? 'Replaced by a new checkout' : 'Checkout not completed' })
+      .where(and(eq(ledgerEntries.id, live.id), eq(ledgerEntries.status, 'PENDING')))
+      .returning({ id: ledgerEntries.id })
+    // It settled while the provider was being asked: there is nothing left to pay for.
+    if (!closed) return { bounty: (await bountyById(ctx.db, bounty.id)) ?? bounty, checkoutUrl: null }
   }
   const [prior] = await ctx.db.select({ attempts: count() }).from(ledgerEntries).where(and(eq(ledgerEntries.bountyId, bounty.id), eq(ledgerEntries.type, 'DEPOSIT')))
   const attempt = (prior?.attempts ?? 0) + 1
@@ -264,7 +274,10 @@ export async function confirmPayment(ctx: MoneyContext, poster: User, bountyId: 
 /**
  * Applies a checkout result to its deposit row, once. Money only counts when
  * the provider says the exact amount and currency were paid; anything else is
- * recorded for an admin and the bounty stays unfunded.
+ * recorded for an admin and the bounty stays unfunded. A payment that lands on
+ * a checkout already written off (replaced, timed out, deleted) is taken in
+ * too: it funds the bounty if that is still possible, and goes straight back
+ * to the card otherwise.
  */
 export async function settleDeposit(ctx: MoneyContext, reference: string, result: CheckoutResult): Promise<Bounty> {
   const { bounty, refund } = await ctx.db.transaction(async (tx) => {
@@ -272,11 +285,13 @@ export async function settleDeposit(ctx: MoneyContext, reference: string, result
     if (!entry || entry.type !== 'DEPOSIT') throw notFound('Payment')
     const [current] = await tx.select().from(bounties).where(eq(bounties.id, entry.bountyId)).for('update')
     if (!current) throw notFound()
-    if (entry.status !== 'PENDING') return { bounty: current, refund: null }
-
+    const unchanged = { bounty: current, refund: null }
+    // Counted already, or already in front of an admin; a written-off row with a settlement date was taken in and refunded.
+    if (entry.status === 'SETTLED' || entry.status === 'MISMATCH' || entry.settledAt) return unchanged
+    if (result.status === 'PENDING') return unchanged
     if (result.status === 'FAILED') {
-      await tx.update(ledgerEntries).set({ status: 'FAILED', providerRef: result.providerRef || null, note: 'Checkout failed' }).where(eq(ledgerEntries.id, entry.id))
-      return { bounty: current, refund: null }
+      if (entry.status === 'PENDING') await tx.update(ledgerEntries).set({ status: 'FAILED', providerRef: result.providerRef || null, note: 'Checkout failed' }).where(eq(ledgerEntries.id, entry.id))
+      return unchanged
     }
     if (result.amountCents !== entry.amountCents || result.currency !== entry.currency) {
       await tx
@@ -284,31 +299,46 @@ export async function settleDeposit(ctx: MoneyContext, reference: string, result
         .set({ status: 'MISMATCH', providerRef: result.providerRef, note: `Provider reports ${result.currency} ${result.amountCents}, expected ${entry.currency} ${entry.amountCents}` })
         .where(eq(ledgerEntries.id, entry.id))
       await addEvent(tx, { bountyId: current.id, kind: 'FUNDED', note: 'Payment amount did not match; needs an admin', recipientId: null })
-      return { bounty: current, refund: null }
+      return unchanged
     }
 
+    const now = new Date()
+    const late = entry.status === 'FAILED'
+    // Money on a checkout that was written off: another checkout for the same bounty may be open, or already paid.
+    const other = late ? await liveDeposit(tx, current.id) : null
+    if (other?.status === 'PENDING') {
+      await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Replaced: an earlier checkout was paid' }).where(and(eq(ledgerEntries.id, other.id), eq(ledgerEntries.status, 'PENDING')))
+    }
+    const paidTwice = other?.status === 'SETTLED'
     await tx
       .update(ledgerEntries)
-      .set({ status: 'SETTLED', providerRef: result.providerRef, providerFeeCents: result.feeCents, settledAt: new Date() })
+      .set({
+        // One live deposit per bounty is a database rule: a second payment stays a written-off row, dated, with its refund beside it.
+        status: paidTwice ? 'FAILED' : 'SETTLED',
+        providerRef: result.providerRef,
+        providerFeeCents: result.feeCents,
+        settledAt: now,
+        note: paidTwice ? 'Paid after this checkout was replaced; refunded in full' : late ? 'Paid after this checkout was written off' : entry.note,
+      })
       .where(eq(ledgerEntries.id, entry.id))
-    const now = new Date()
-    if (current.status === 'PENDING_PAYMENT') {
+
+    if (current.status === 'PENDING_PAYMENT' && !paidTwice) {
       const status: BountyStatus = current.kind === 'MISSING_PERSON' ? 'PENDING_REVIEW' : 'OPEN'
       const [updated] = await tx
         .update(bounties)
-        .set({ status, depositedCents: current.depositedCents + entry.amountCents, fundedAt: now, expiresAt: bountyExpiresAt(now, current.durationDays) })
+        .set({ status, depositedCents: current.depositedCents + entry.amountCents, fundedAt: now, expiresAt: bountyExpiresAt(now, current.durationDays), listedAt: status === 'OPEN' ? now : null })
         .where(and(eq(bounties.id, current.id), eq(bounties.status, 'PENDING_PAYMENT')))
         .returning()
       await addEvent(tx, { bountyId: current.id, kind: 'FUNDED', actorId: current.posterId, isPublic: true })
       return { bounty: updated!, refund: null }
     }
-    // Paid after the bounty was abandoned or cancelled: take the money in, then give it straight back.
+    // Paid after the bounty closed, or paid twice: take the money in, then give it straight back.
     const [updated] = await tx
       .update(bounties)
       .set({ depositedCents: current.depositedCents + entry.amountCents })
       .where(eq(bounties.id, current.id))
       .returning()
-    const lateRefund = await queueRefund(tx, updated!, entry, 'Paid after the bounty closed', null)
+    const lateRefund = await queueRefund(tx, updated!, entry, paidTwice ? 'Paid twice; the second payment goes back' : 'Paid after the bounty closed', null, false, entry.amountCents)
     return { bounty: updated!, refund: lateRefund }
   })
   if (refund) await sendRefund(ctx, refund)
@@ -317,9 +347,17 @@ export async function settleDeposit(ctx: MoneyContext, reference: string, result
 
 /* Refunds */
 
-/** Records a refund of everything still held. Provider call follows the commit (sendRefund). */
-async function queueRefund(tx: Tx, bounty: Bounty, deposit: LedgerEntry, note: string, actorId: string | null, byAdmin = false): Promise<LedgerEntry | null> {
-  const remaining = bounty.depositedCents - bounty.releasedCents - bounty.refundedCents
+/**
+ * Records a refund of everything still held (or of `amountCents`). The provider
+ * call follows the commit (sendRefund). The key names the deposit being given
+ * back, so the provider is asked to refund that transaction and no other.
+ */
+async function queueRefund(tx: Tx, bounty: Bounty, deposit: LedgerEntry, note: string, actorId: string | null, byAdmin = false, amountCents?: number): Promise<LedgerEntry | null> {
+  const [queued] = await tx
+    .select({ n: sql<number>`coalesce(sum(${ledgerEntries.amountCents}), 0)::int` })
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.bountyId, bounty.id), eq(ledgerEntries.type, 'REFUND'), eq(ledgerEntries.status, 'PENDING')))
+  const remaining = amountCents ?? bounty.depositedCents - bounty.releasedCents - bounty.refundedCents - (queued?.n ?? 0)
   if (remaining <= 0) return null
   const [prior] = await tx.select({ attempts: count() }).from(ledgerEntries).where(and(eq(ledgerEntries.bountyId, bounty.id), eq(ledgerEntries.type, 'REFUND')))
   const attempt = (prior?.attempts ?? 0) + 1
@@ -342,14 +380,21 @@ async function queueRefund(tx: Tx, bounty: Bounty, deposit: LedgerEntry, note: s
   return row!
 }
 
+/** The deposit a refund gives back, named in its key (`refund:<bounty>:<deposit>:<n>`). */
+async function refundedDeposit(db: Database | Tx, refund: LedgerEntry): Promise<LedgerEntry | null> {
+  const depositId = refund.idempotencyKey.split(':')[2] ?? ''
+  const [row] = UUID.test(depositId) ? await db.select().from(ledgerEntries).where(eq(ledgerEntries.id, depositId)) : []
+  return row ?? null
+}
+
 async function sendRefund(ctx: MoneyContext, refund: LedgerEntry): Promise<void> {
   const provider = ctx.payments.provider
   if (!provider) return
-  const [deposit] = await ctx.db
-    .select()
-    .from(ledgerEntries)
-    .where(and(eq(ledgerEntries.bountyId, refund.bountyId), eq(ledgerEntries.type, 'DEPOSIT'), eq(ledgerEntries.status, 'SETTLED')))
-  if (!deposit?.providerRef) return
+  const deposit = await refundedDeposit(ctx.db, refund)
+  if (!deposit?.providerRef) {
+    console.error('[bounties] refund has no transaction to go back to', { refund: refund.reference })
+    return
+  }
   try {
     const result = await provider.refund({ transactionRef: deposit.providerRef, amountCents: refund.amountCents, currency: refund.currency, note: refund.note ?? 'Bounty refund' })
     await applyRefund(ctx, { reference: refund.reference, status: result.status, providerRef: result.providerRef })
@@ -358,19 +403,38 @@ async function sendRefund(ctx: MoneyContext, refund: LedgerEntry): Promise<void>
   }
 }
 
+/** A deposit by our reference (what Paystack's refund and dispute events carry) or by the provider's transaction id. */
+async function depositByRef(db: Database | Tx, ref: string): Promise<LedgerEntry | null> {
+  if (!ref) return null
+  const [row] = await db
+    .select()
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.type, 'DEPOSIT'), or(eq(ledgerEntries.reference, ref), eq(ledgerEntries.providerRef, ref))))
+    .orderBy(desc(ledgerEntries.createdAt))
+    .limit(1)
+  return row ?? null
+}
+
 export async function applyRefund(ctx: MoneyContext, update: { reference?: string; transactionRef?: string; status: RefundStatus; providerRef: string | null }): Promise<void> {
   await ctx.db.transaction(async (tx) => {
     let entry: LedgerEntry | undefined
     if (update.reference) {
       ;[entry] = await tx.select().from(ledgerEntries).where(eq(ledgerEntries.reference, update.reference)).for('update')
     } else if (update.transactionRef) {
-      // Paystack's refund events name the transaction, not our refund: the pending refund of that deposit's bounty.
-      const [deposit] = await tx.select().from(ledgerEntries).where(and(eq(ledgerEntries.providerRef, update.transactionRef), eq(ledgerEntries.type, 'DEPOSIT')))
+      // Paystack's refund events name the transaction, not our refund: the pending refund of that deposit.
+      const deposit = await depositByRef(tx, update.transactionRef)
       if (deposit) {
         ;[entry] = await tx
           .select()
           .from(ledgerEntries)
-          .where(and(eq(ledgerEntries.bountyId, deposit.bountyId), eq(ledgerEntries.type, 'REFUND'), eq(ledgerEntries.status, 'PENDING')))
+          .where(
+            and(
+              eq(ledgerEntries.bountyId, deposit.bountyId),
+              eq(ledgerEntries.type, 'REFUND'),
+              eq(ledgerEntries.status, 'PENDING'),
+              sql`${ledgerEntries.idempotencyKey} like ${`refund:${deposit.bountyId}:${deposit.id}:%`}`,
+            ),
+          )
           .orderBy(desc(ledgerEntries.createdAt))
           .for('update')
       }
@@ -382,7 +446,8 @@ export async function applyRefund(ctx: MoneyContext, update: { reference?: strin
     }
     if (update.status === 'FAILED') {
       await tx.update(ledgerEntries).set({ status: 'FAILED', providerRef: update.providerRef ?? entry.providerRef }).where(eq(ledgerEntries.id, entry.id))
-      await addEvent(tx, { bountyId: entry.bountyId, kind: 'REFUND_FAILED', note: 'The provider could not refund the deposit' })
+      // The poster is owed money until an admin sends it again (retryRefund); both hear about it.
+      await addEvent(tx, { bountyId: entry.bountyId, kind: 'REFUND_FAILED', recipientId: entry.userId, note: 'The refund to your card didn’t go through. CIVIC/ONE is looking at it and will send it again.' })
       return
     }
     await tx.update(ledgerEntries).set({ status: 'SETTLED', providerRef: update.providerRef ?? entry.providerRef, settledAt: new Date() }).where(eq(ledgerEntries.id, entry.id))
@@ -393,23 +458,30 @@ export async function applyRefund(ctx: MoneyContext, update: { reference?: strin
   })
 }
 
+/** Claims nobody decided are closed with the bounty. */
+async function closeLiveClaims(tx: Tx, bountyId: string, note: string): Promise<void> {
+  const open = await tx.select().from(bountyClaims).where(and(eq(bountyClaims.bountyId, bountyId), inArray(bountyClaims.status, LIVE_CLAIMS)))
+  for (const claim of open) {
+    await tx.update(bountyClaims).set({ status: 'REJECTED', decisionReason: 'BOUNTY_CLOSED', decidedAt: new Date() }).where(eq(bountyClaims.id, claim.id))
+    await addEvent(tx, { bountyId, claimId: claim.id, kind: 'CLAIM_REJECTED', recipientId: claim.claimantId, note })
+  }
+}
+
 /** Closes a funded bounty and refunds the poster, inside the caller's transaction. */
 async function closeAndRefund(tx: Tx, bounty: Bounty, status: 'CANCELLED' | 'EXPIRED', kind: BountyEventKind, note: string, actorId: string | null, byAdmin = false): Promise<LedgerEntry | null> {
   const [updated] = await tx
     .update(bounties)
-    .set({ status, closedAt: new Date(), winningClaimId: null })
+    .set({ status, closedAt: new Date(), winningClaimId: null, frozenFromStatus: null })
     .where(and(eq(bounties.id, bounty.id), eq(bounties.status, bounty.status)))
     .returning()
   if (!updated) throw badInput('This bounty changed while you were looking at it. Reload and try again.')
   await addEvent(tx, { bountyId: bounty.id, kind, actorId, byAdmin, recipientId: bounty.posterId, isPublic: true, note })
-  // Claims nobody decided are closed with the bounty.
-  const open = await tx.select().from(bountyClaims).where(and(eq(bountyClaims.bountyId, bounty.id), inArray(bountyClaims.status, LIVE_CLAIMS)))
-  for (const claim of open) {
-    await tx.update(bountyClaims).set({ status: 'REJECTED', decisionReason: 'BOUNTY_CLOSED', decidedAt: new Date() }).where(eq(bountyClaims.id, claim.id))
-    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_REJECTED', recipientId: claim.claimantId, note: 'The bounty was closed' })
-  }
+  await closeLiveClaims(tx, bounty.id, 'The bounty was closed')
+  if (updated.depositedCents - updated.releasedCents - updated.refundedCents <= 0) return null
   const deposit = await liveDeposit(tx, bounty.id)
-  return deposit?.status === 'SETTLED' ? queueRefund(tx, updated, deposit, note, actorId, byAdmin) : null
+  // Money is held but no settled deposit says where it came from: never close quietly over it.
+  if (deposit?.status !== 'SETTLED') throw new Error(`Bounty ${bounty.id} holds money with no settled deposit`)
+  return queueRefund(tx, updated, deposit, note, actorId, byAdmin)
 }
 
 /* Poster actions */
@@ -418,6 +490,11 @@ async function ownBounty(db: Database, poster: User, bountyId: string): Promise<
   const [bounty] = UUID.test(bountyId) ? await db.select().from(bounties).where(and(eq(bounties.id, bountyId), eq(bounties.posterId, poster.id))) : []
   if (!bounty) throw notFound()
   return bounty
+}
+
+/** Admin actions never touch an admin's own bounty, or one they claimed: the second pair of eyes has to be someone else's. */
+async function notParty(db: Database, admin: User, bounty: Bounty, message = 'You can’t act on a bounty you’re part of.'): Promise<void> {
+  if (bounty.posterId === admin.id || (await viewerClaim(db, bounty.id, admin.id))) throw forbidden(message)
 }
 
 /** Claims that keep a bounty alive: live ones, and poster rejections still inside the claimant's dispute window. */
@@ -437,11 +514,15 @@ export async function cancelBounty(ctx: MoneyContext, poster: User, bountyId: st
   if (bounty.status === 'PENDING_PAYMENT') {
     const [updated] = await ctx.db.transaction(async (tx) => {
       const deposit = await liveDeposit(tx, bounty.id)
-      if (deposit?.status === 'PENDING') await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Cancelled before payment' }).where(eq(ledgerEntries.id, deposit.id))
-      await addEvent(tx, { bountyId: bounty.id, kind: 'CANCELLED', actorId: poster.id })
-      return tx.update(bounties).set({ status: 'ABANDONED', closedAt: new Date() }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'PENDING_PAYMENT'))).returning()
+      if (deposit?.status === 'PENDING') {
+        await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Cancelled before payment' }).where(and(eq(ledgerEntries.id, deposit.id), eq(ledgerEntries.status, 'PENDING')))
+      }
+      const rows = await tx.update(bounties).set({ status: 'ABANDONED', closedAt: new Date() }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'PENDING_PAYMENT'))).returning()
+      if (rows.length) await addEvent(tx, { bountyId: bounty.id, kind: 'CANCELLED', actorId: poster.id })
+      return rows
     })
-    return updated ?? bounty
+    // No row means the payment settled in the meantime: the bounty is funded, not deleted.
+    return updated ?? (await bountyById(ctx.db, bounty.id)) ?? bounty
   }
   if (bounty.status !== 'OPEN' && bounty.status !== 'PENDING_REVIEW') throw badInput('This bounty can’t be cancelled now.')
   if (await liveClaimCount(ctx.db, bounty.id)) {
@@ -474,6 +555,9 @@ export async function submitClaim(ctx: MoneyContext, claimant: User, bountyId: s
     const wait = minAge >= 48 ? `${Math.round(minAge / 24)} days` : `${minAge} hours`
     throw badInput(`New accounts can submit claims after ${wait}. In the meantime, give what you know to SAPS on 10111.`)
   }
+  // One claim per person per bounty, ever: withdrawing and claiming again would keep a bounty from closing for as long as someone liked.
+  const [earlier] = await ctx.db.select({ status: bountyClaims.status }).from(bountyClaims).where(and(eq(bountyClaims.bountyId, bounty.id), eq(bountyClaims.claimantId, claimant.id))).limit(1)
+  if (earlier) throw badInput(earlier.status === 'WITHDRAWN' ? 'You withdrew your claim on this bounty, and a bounty can be claimed once.' : 'You already have a claim on this bounty.')
   const parsed = submitClaimSchema.safeParse(raw)
   if (!parsed.success) throw badInput(parsed.error.issues[0]?.message ?? 'Invalid claim', issues(parsed.error))
   checkClaimText(bounty.kind, parsed.data.body)
@@ -536,11 +620,13 @@ export async function confirmClaim(ctx: MoneyContext, poster: User, claimId: str
       if (!updatedBounty) throw badInput('This bounty changed while you were looking at it. Reload and try again.')
       const [updated] = await tx
         .update(bountyClaims)
-        .set({ status: 'CONFIRMED', posterNote: note, confirmedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind) })
+        .set({ status: 'CONFIRMED', confirmNote: note, confirmedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind) })
         .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, claim.status)))
         .returning()
+      // Withdrawn a moment ago: the whole confirmation rolls back rather than pointing the bounty at a dead claim.
+      if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
       await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_CONFIRMED', actorId: poster.id, recipientId: claim.claimantId, isPublic: true })
-      return updated!
+      return updated
     })
   } catch (error) {
     if (violates(error, 'bounty_claims_one_winner_idx')) throw badInput('Another claim on this bounty is already confirmed.')
@@ -635,31 +721,41 @@ export async function decideClaim(
   rawNote: string,
 ): Promise<BountyClaim> {
   const { claim, bounty } = await claimById(ctx.db, claimId)
-  if (bounty.posterId === admin.id || claim.claimantId === admin.id) throw forbidden('You can’t decide a claim on a bounty you’re part of.')
+  if (claim.claimantId === admin.id) throw forbidden('You can’t decide a claim on a bounty you’re part of.')
+  await notParty(ctx.db, admin, bounty, 'You can’t decide a claim on a bounty you’re part of.')
   if (claim.status !== 'CONFIRMED' && claim.status !== 'DISPUTED') throw badInput('This claim isn’t waiting for a decision.')
   if (bounty.status !== 'AWAITING_VERIFICATION' && bounty.status !== 'OPEN') throw badInput('This bounty isn’t taking decisions right now.')
+  if (bounty.winningClaimId && bounty.winningClaimId !== claim.id) throw badInput('The poster confirmed another claim on this bounty. Decide that one first.')
   const note = bountyNoteSchema.parse(rawNote)
   const now = new Date()
 
   if (decision === 'REJECT') {
     if (reason === 'VERIFIED' || reason === 'ADMIN_OVERRIDE') throw badInput('Choose a reason for rejecting.')
-    return ctx.db.transaction(async (tx) => {
-      const [updated] = await tx
+    const { rejected, refund } = await ctx.db.transaction(async (tx) => {
+      const [decided] = await tx
         .update(bountyClaims)
         .set({ status: 'REJECTED', decisionReason: reason, decisionNote: note, decidedById: admin.id, decidedAt: now })
         .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, claim.status)))
         .returning()
+      if (!decided) throw badInput('This claim changed while you were looking at it. Reload and try again.')
+      let queued: LedgerEntry | null = null
       if (bounty.winningClaimId === claim.id) {
-        // Back to taking claims, unless its time ran out while this one was under review.
-        if (bounty.expiresAt && bounty.expiresAt < now) {
-          await closeAndRefund(tx, { ...bounty, status: 'AWAITING_VERIFICATION' }, 'EXPIRED', 'EXPIRED', 'The bounty expired', null, true)
+        // Back to taking claims. If its time ran out while this one was under review it expires now, unless other claims
+        // are still being answered: then it reopens and the sweep expires it once they are, as with any open bounty.
+        const outOfTime = bounty.expiresAt !== null && bounty.expiresAt < now
+        if (outOfTime && !(await liveClaimCount(tx, bounty.id))) {
+          queued = await closeAndRefund(tx, { ...bounty, status: 'AWAITING_VERIFICATION' }, 'EXPIRED', 'EXPIRED', 'The bounty expired', null, true)
         } else {
           await tx.update(bounties).set({ status: 'OPEN', winningClaimId: null }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'AWAITING_VERIFICATION')))
         }
+        // The poster hears the decision with its public reason; the admin's note goes to the claimant.
+        await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_REJECTED', actorId: admin.id, byAdmin: true, recipientId: bounty.posterId, note: CLAIM_DECISION_LABEL[reason] })
       }
       await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_REJECTED', actorId: admin.id, byAdmin: true, recipientId: claim.claimantId, note })
-      return updated!
+      return { rejected: decided, refund: queued }
     })
+    if (refund) await sendRefund(ctx, refund)
+    return rejected
   }
 
   if (claim.status === 'DISPUTED' && reason !== 'ADMIN_OVERRIDE') throw badInput('Paying a claim the poster rejected is an override; record it as one.')
@@ -673,23 +769,29 @@ export async function decideClaim(
   if (ready > now) throw badInput(`The claimant’s payout account is on hold until ${ready.toISOString()}.`, { readyAt: ready.toISOString() })
   const preflight = await releasePreflight(ctx.db, bounty, claim)
 
-  const released = await ctx.db.transaction(async (tx) => {
-    const [updatedBounty] = await tx
-      .update(bounties)
-      .set({ status: 'RELEASING', winningClaimId: claim.id })
-      .where(and(eq(bounties.id, bounty.id), inArray(bounties.status, ['AWAITING_VERIFICATION', 'OPEN'])))
-      .returning()
-    if (!updatedBounty) throw badInput('This bounty changed while you were looking at it. Reload and try again.')
-    const [updated] = await tx
-      .update(bountyClaims)
-      .set({ status: 'VERIFIED', decisionReason: reason, decisionNote: note, decidedById: admin.id, decidedAt: now, preflight: JSON.stringify(preflight), payoutAccountId: account.id })
-      .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, claim.status)))
-      .returning()
-    if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
-    const release = await queueRelease(tx, updatedBounty, updated, account)
-    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_VERIFIED', actorId: admin.id, byAdmin: true, recipientId: claim.claimantId, isPublic: true, note })
-    return release
-  })
+  let released: LedgerEntry
+  try {
+    released = await ctx.db.transaction(async (tx) => {
+      const [updatedBounty] = await tx
+        .update(bounties)
+        .set({ status: 'RELEASING', winningClaimId: claim.id })
+        .where(and(eq(bounties.id, bounty.id), inArray(bounties.status, ['AWAITING_VERIFICATION', 'OPEN'])))
+        .returning()
+      if (!updatedBounty) throw badInput('This bounty changed while you were looking at it. Reload and try again.')
+      const [updated] = await tx
+        .update(bountyClaims)
+        .set({ status: 'VERIFIED', decisionReason: reason, decisionNote: note, decidedById: admin.id, decidedAt: now, preflight: JSON.stringify(preflight), payoutAccountId: account.id })
+        .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, claim.status)))
+        .returning()
+      if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
+      const release = await queueRelease(tx, updatedBounty, updated, account)
+      await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_VERIFIED', actorId: admin.id, byAdmin: true, recipientId: claim.claimantId, isPublic: true, note })
+      return release
+    })
+  } catch (error) {
+    if (violates(error, 'bounty_claims_one_winner_idx')) throw badInput('Another claim on this bounty is already confirmed or paid.')
+    throw error
+  }
   await sendTransfer(ctx, released)
   return (await claimById(ctx.db, claim.id)).claim
 }
@@ -721,28 +823,45 @@ async function sendTransfer(ctx: MoneyContext, release: LedgerEntry): Promise<vo
   const [claim] = await ctx.db.select().from(bountyClaims).where(eq(bountyClaims.id, release.claimId))
   const [account] = claim?.payoutAccountId ? await ctx.db.select().from(payoutAccounts).where(eq(payoutAccounts.id, claim.payoutAccountId)) : []
   if (!account) return
+  let existing: TransferResult | null
   try {
     // Paystack keeps a transfer per reference; find it first so a retried step never pays twice.
-    const existing = await provider.fetchTransfer(release.reference)
+    existing = await provider.fetchTransfer(release.reference)
+  } catch (error) {
+    console.error('[bounties] transfer not checked', { release: release.reference, error })
+    return
+  }
+  try {
     const result =
       existing ??
       (await provider.transfer({ reference: release.reference, amountCents: release.amountCents, currency: release.currency, recipientCode: account.recipientCode, reason: 'CIVIC/ONE bounty' }))
     await applyTransfer(ctx, release.reference, result.status, result.providerRef)
   } catch (error) {
     console.error('[bounties] transfer not sent', { release: release.reference, error })
+    // A refusal (not enough balance, a dead recipient) is a failed payout an admin retries once it's fixed; a timeout or an
+    // outage is left for the sweep. "Already exists" means it went through after all, and the sweep finds it by reference.
+    const refused = existing === null && error instanceof PaymentProviderError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 429
+    if (refused && !/exist|duplicate/i.test(error.message)) {
+      await applyTransfer(ctx, release.reference, 'FAILED', null, `The provider refused the transfer: ${error.message}`).catch((failure: unknown) =>
+        console.error('[bounties] payout failure not recorded', { release: release.reference, failure }),
+      )
+    }
   }
 }
 
-/** Applies what the provider says about a payout: settled, failed, or reversed after settling. */
-export async function applyTransfer(ctx: MoneyContext, reference: string, status: TransferStatus, providerRef: string | null): Promise<void> {
+/** Applies what the provider says about a payout: taken, settled, failed, or reversed after settling. */
+export async function applyTransfer(ctx: MoneyContext, reference: string, status: TransferStatus, providerRef: string | null, note?: string): Promise<void> {
   await ctx.db.transaction(async (tx) => {
     const [entry] = await tx.select().from(ledgerEntries).where(eq(ledgerEntries.reference, reference)).for('update')
     if (!entry || entry.type !== 'RELEASE') return
     const [bounty] = await tx.select().from(bounties).where(eq(bounties.id, entry.bountyId)).for('update')
     if (!bounty) return
     if (status === 'PENDING') {
-      if (providerRef && !entry.providerRef) await tx.update(ledgerEntries).set({ providerRef }).where(eq(ledgerEntries.id, entry.id))
-      await addEvent(tx, { bountyId: bounty.id, claimId: entry.claimId, kind: 'PAYOUT_SENT', isPublic: true })
+      // Told once, when the provider first takes it; the sweep asks after it every hour until it settles.
+      if (providerRef && !entry.providerRef) {
+        await tx.update(ledgerEntries).set({ providerRef }).where(eq(ledgerEntries.id, entry.id))
+        await addEvent(tx, { bountyId: bounty.id, claimId: entry.claimId, kind: 'PAYOUT_SENT', isPublic: true })
+      }
       return
     }
     if (status === 'SUCCESS' && entry.status === 'PENDING') {
@@ -763,8 +882,12 @@ export async function applyTransfer(ctx: MoneyContext, reference: string, status
       await addEvent(tx, { bountyId: bounty.id, claimId: entry.claimId, kind: 'PAID', recipientId: bounty.posterId })
       return
     }
-    if (status === 'FAILED' && entry.status === 'PENDING') {
-      await tx.update(ledgerEntries).set({ status: 'FAILED', providerRef: providerRef ?? entry.providerRef, note: 'The bank rejected the transfer' }).where(eq(ledgerEntries.id, entry.id))
+    if ((status === 'FAILED' || status === 'REVERSED') && entry.status === 'PENDING') {
+      // Never paid: the bank bounced it, or the provider sent the money back before it settled. An admin retries.
+      await tx
+        .update(ledgerEntries)
+        .set({ status: 'FAILED', providerRef: providerRef ?? entry.providerRef, note: note ?? (status === 'REVERSED' ? 'Returned by the provider before it settled' : 'The bank rejected the transfer') })
+        .where(eq(ledgerEntries.id, entry.id))
       await addEvent(tx, { bountyId: bounty.id, claimId: entry.claimId, kind: 'PAYOUT_FAILED', recipientId: entry.userId, note: 'The transfer to your bank failed. Check your payout account; CIVIC/ONE will retry.' })
       return
     }
@@ -795,36 +918,67 @@ export async function applyTransfer(ctx: MoneyContext, reference: string, status
   })
 }
 
-/** After a failed or reversed payout, an admin sends it again (to the claimant's current account). */
+/** After a failed or reversed payout, an admin sends it again, to the claimant's current account, under the same checks as the first time. */
 export async function retryPayout(ctx: MoneyContext, admin: User, bountyId: string): Promise<Bounty> {
   const bounty = await bountyById(ctx.db, bountyId)
   if (!bounty || bounty.status !== 'RELEASING' || !bounty.winningClaimId) throw badInput('There is no payout to retry on this bounty.')
+  await notParty(ctx.db, admin, bounty)
   const { claim } = await claimById(ctx.db, bounty.winningClaimId)
   if (!claim.claimantId) throw badInput('The claimant deleted their account.')
   const account = await activePayoutAccount(ctx.db, claim.claimantId)
   if (!account) throw badInput('The claimant has no payout account.')
+  // The same hold as the first time: a payout never goes to an account added minutes ago.
+  const ready = payoutAccountReadyAt(account.createdAt)
+  if (ready > new Date()) throw badInput(`The claimant’s payout account is on hold until ${ready.toISOString()}.`, { readyAt: ready.toISOString() })
+  const preflight = await releasePreflight(ctx.db, bounty, claim)
   const release = await ctx.db.transaction(async (tx) => {
-    const [pending] = await tx
-      .select()
-      .from(ledgerEntries)
-      .where(and(eq(ledgerEntries.bountyId, bounty.id), eq(ledgerEntries.type, 'RELEASE'), inArray(ledgerEntries.status, ['PENDING', 'SETTLED'])))
-    if (pending) return pending
-    await tx.update(bountyClaims).set({ payoutAccountId: account.id }).where(eq(bountyClaims.id, claim.id))
-    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'PAYOUT_SENT', actorId: admin.id, byAdmin: true, note: 'Payout retried' })
+    const live = await liveRelease(tx, bounty.id)
+    if (live) return live
+    // The record shows what was checked for the account actually being paid.
+    await tx.update(bountyClaims).set({ payoutAccountId: account.id, preflight: JSON.stringify(preflight) }).where(eq(bountyClaims.id, claim.id))
+    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'PAYOUT_SENT', actorId: admin.id, byAdmin: true, note: `Payout retried to ${account.bankName} ••••${account.accountLast4}` })
     return queueRelease(tx, bounty, { ...claim, payoutAccountId: account.id }, account)
   })
   await sendTransfer(ctx, release)
   return (await bountyById(ctx.db, bounty.id))!
 }
 
+async function liveRelease(db: Database | Tx, bountyId: string): Promise<LedgerEntry | null> {
+  const [row] = await db
+    .select()
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.bountyId, bountyId), eq(ledgerEntries.type, 'RELEASE'), inArray(ledgerEntries.status, ['PENDING', 'SETTLED'])))
+  return row ?? null
+}
+
+/** After the provider failed a refund, an admin sends it again, against the same deposit. */
+export async function retryRefund(ctx: MoneyContext, admin: User, bountyId: string): Promise<Bounty> {
+  const bounty = await bountyById(ctx.db, bountyId)
+  if (!bounty) throw notFound()
+  await notParty(ctx.db, admin, bounty)
+  const refunds = await ctx.db
+    .select()
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.bountyId, bounty.id), eq(ledgerEntries.type, 'REFUND')))
+    .orderBy(desc(ledgerEntries.createdAt))
+  if (refunds.some((row) => row.status === 'PENDING')) throw badInput('A refund is already on its way.')
+  const failed = refunds.find((row) => row.status === 'FAILED')
+  const owed = bounty.depositedCents - bounty.releasedCents - bounty.refundedCents
+  const deposit = failed ? await refundedDeposit(ctx.db, failed) : null
+  if (!failed || !deposit || owed <= 0) throw badInput('There is no refund to retry on this bounty.')
+  const refund = await ctx.db.transaction((tx) => queueRefund(tx, bounty, deposit, 'Refund sent again by CIVIC/ONE', admin.id, true, Math.min(owed, failed.amountCents)))
+  if (refund) await sendRefund(ctx, refund)
+  return (await bountyById(ctx.db, bounty.id))!
+}
+
 export async function approveBounty(ctx: MoneyContext, admin: User, bountyId: string, rawNote: string): Promise<Bounty> {
   const bounty = await bountyById(ctx.db, bountyId)
   if (!bounty || bounty.status !== 'PENDING_REVIEW') throw badInput('This bounty isn’t waiting for review.')
-  if (bounty.posterId === admin.id) throw forbidden('You can’t review your own bounty.')
+  await notParty(ctx.db, admin, bounty, 'You can’t review your own bounty.')
   const note = bountyNoteSchema.parse(rawNote)
   const [updated] = await ctx.db.transaction(async (tx) => {
     await addEvent(tx, { bountyId: bounty.id, kind: 'APPROVED', actorId: admin.id, byAdmin: true, recipientId: bounty.posterId, isPublic: true, note })
-    return tx.update(bounties).set({ status: 'OPEN' }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'PENDING_REVIEW'))).returning()
+    return tx.update(bounties).set({ status: 'OPEN', listedAt: new Date() }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'PENDING_REVIEW'))).returning()
   })
   return updated ?? bounty
 }
@@ -832,6 +986,7 @@ export async function approveBounty(ctx: MoneyContext, admin: User, bountyId: st
 export async function declineBounty(ctx: MoneyContext, admin: User, bountyId: string, rawNote: string): Promise<Bounty> {
   const bounty = await bountyById(ctx.db, bountyId)
   if (!bounty || bounty.status !== 'PENDING_REVIEW') throw badInput('This bounty isn’t waiting for review.')
+  await notParty(ctx.db, admin, bounty, 'You can’t review your own bounty.')
   const note = bountyNoteSchema.parse(rawNote)
   const refund = await ctx.db.transaction(async (tx) => {
     await addEvent(tx, { bountyId: bounty.id, kind: 'DECLINED', actorId: admin.id, byAdmin: true, recipientId: bounty.posterId, note })
@@ -841,11 +996,19 @@ export async function declineBounty(ctx: MoneyContext, admin: User, bountyId: st
   return (await bountyById(ctx.db, bounty.id))!
 }
 
-export async function adminCancelBounty(ctx: MoneyContext, admin: User, bountyId: string, rawNote: string): Promise<Bounty> {
+/** Closes a bounty from the review side and refunds the poster. With `takeDown`, the page stays visible only to the poster, claimants and CIVIC/ONE. */
+export async function adminCancelBounty(ctx: MoneyContext, admin: User, bountyId: string, rawNote: string, takeDown = false): Promise<Bounty> {
   const bounty = await bountyById(ctx.db, bountyId)
-  if (!bounty || !['OPEN', 'AWAITING_VERIFICATION', 'PENDING_REVIEW', 'FROZEN'].includes(bounty.status)) throw badInput('This bounty can’t be cancelled now.')
+  if (!bounty) throw badInput('This bounty can’t be cancelled now.')
+  await notParty(ctx.db, admin, bounty)
+  // A payout that failed and can't go anywhere is the one way out of RELEASING.
+  const cancellable = ['OPEN', 'AWAITING_VERIFICATION', 'PENDING_REVIEW', 'FROZEN'].includes(bounty.status) || (bounty.status === 'RELEASING' && !(await liveRelease(ctx.db, bounty.id)))
+  if (!cancellable) throw badInput('This bounty can’t be cancelled now.')
   const note = bountyNoteSchema.parse(rawNote)
-  const refund = await ctx.db.transaction((tx) => closeAndRefund(tx, bounty, 'CANCELLED', 'CANCELLED', note, admin.id, true))
+  const refund = await ctx.db.transaction(async (tx) => {
+    if (takeDown) await tx.update(bounties).set({ removedAt: new Date() }).where(eq(bounties.id, bounty.id))
+    return closeAndRefund(tx, bounty, 'CANCELLED', 'CANCELLED', note, admin.id, true)
+  })
   if (refund) await sendRefund(ctx, refund)
   return (await bountyById(ctx.db, bounty.id))!
 }
@@ -853,6 +1016,7 @@ export async function adminCancelBounty(ctx: MoneyContext, admin: User, bountyId
 export async function freezeBounty(ctx: MoneyContext, admin: User | null, bountyId: string, rawNote: string): Promise<Bounty> {
   const bounty = await bountyById(ctx.db, bountyId)
   if (!bounty || !['OPEN', 'AWAITING_VERIFICATION', 'PENDING_REVIEW'].includes(bounty.status)) throw badInput('This bounty can’t be put on hold now.')
+  if (admin) await notParty(ctx.db, admin, bounty)
   const note = bountyNoteSchema.parse(rawNote)
   const [updated] = await ctx.db.transaction(async (tx) => {
     await addEvent(tx, { bountyId: bounty.id, kind: 'FROZEN', actorId: admin?.id, byAdmin: true, recipientId: bounty.posterId, note })
@@ -865,16 +1029,55 @@ export async function freezeBounty(ctx: MoneyContext, admin: User | null, bounty
   return updated ?? bounty
 }
 
+/** The card dispute still open over a bounty's payment: a CHARGEBACK row without its CHARGEBACK_REVERSED. */
+async function openChargeback(db: Database | Tx, bountyId: string): Promise<LedgerEntry | null> {
+  const rows = await db
+    .select()
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.bountyId, bountyId), inArray(ledgerEntries.type, ['CHARGEBACK', 'CHARGEBACK_REVERSED'])))
+    .orderBy(asc(ledgerEntries.createdAt))
+  const closed = new Set(rows.filter((row) => row.type === 'CHARGEBACK_REVERSED').map((row) => row.idempotencyKey.replace(/:RESOLVED$/, '')))
+  return rows.find((row) => row.type === 'CHARGEBACK' && !closed.has(row.idempotencyKey.replace(/:CREATED$/, ''))) ?? null
+}
+
+/**
+ * Releases an admin's hold, or the bank's: with a dispute open over the
+ * payment, releasing says the bank found for CIVIC/ONE (the dashboard shows
+ * it; the webhook can't be trusted to say who won) and the money counts as
+ * held again.
+ */
 export async function unfreezeBounty(ctx: MoneyContext, admin: User, bountyId: string, rawNote: string): Promise<Bounty> {
   const bounty = await bountyById(ctx.db, bountyId)
   if (!bounty || bounty.status !== 'FROZEN' || !bounty.frozenFromStatus) throw badInput('This bounty isn’t on hold.')
+  await notParty(ctx.db, admin, bounty)
   const note = bountyNoteSchema.parse(rawNote)
+  const dispute = await openChargeback(ctx.db, bounty.id)
   // Time on hold doesn't count against the bounty (missing-person bounties still end within their cap).
   const [frozen] = await ctx.db.select().from(bountyEvents).where(and(eq(bountyEvents.bountyId, bounty.id), eq(bountyEvents.kind, 'FROZEN'))).orderBy(desc(bountyEvents.createdAt)).limit(1)
   const extendBy = frozen ? Date.now() - frozen.createdAt.getTime() : 0
   const cap = bounty.fundedAt ? bountyExpiresAt(bounty.fundedAt, BOUNTY_KIND_RULES[bounty.kind].maxDays) : null
   const extended = bounty.expiresAt ? new Date(Math.min(bounty.expiresAt.getTime() + extendBy, cap?.getTime() ?? Infinity)) : null
   const [updated] = await ctx.db.transaction(async (tx) => {
+    if (dispute) {
+      await tx
+        .insert(ledgerEntries)
+        .values({
+          bountyId: bounty.id,
+          userId: dispute.userId,
+          type: 'CHARGEBACK_REVERSED',
+          status: 'SETTLED',
+          amountCents: dispute.amountCents,
+          currency: dispute.currency,
+          provider: dispute.provider,
+          reference: dispute.reference.replace(/-open$/, '-closed'),
+          providerRef: dispute.providerRef,
+          idempotencyKey: dispute.idempotencyKey.replace(/:CREATED$/, ':RESOLVED'),
+          settledAt: new Date(),
+          note: 'Hold released by CIVIC/ONE: the dispute closed in its favour',
+        })
+        .onConflictDoNothing()
+      await addEvent(tx, { bountyId: bounty.id, kind: 'CHARGEBACK', actorId: admin.id, byAdmin: true, note: 'The dispute over the payment is closed; the money is held again' })
+    }
     await addEvent(tx, { bountyId: bounty.id, kind: 'UNFROZEN', actorId: admin.id, byAdmin: true, recipientId: bounty.posterId, note })
     return tx.update(bounties).set({ status: bounty.frozenFromStatus!, frozenFromStatus: null, expiresAt: extended }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'FROZEN'))).returning()
   })
@@ -892,7 +1095,8 @@ export async function reportBounty(ctx: MoneyContext, reporter: User, bountyId: 
       .values({ bountyId: bounty.id, reporterId: reporter.id, reason: parsed.data.reason, note: parsed.data.note ?? null })
       .onConflictDoNothing()
       .returning()
-    if (inserted.length) await addEvent(tx, { bountyId: bounty.id, kind: 'REPORTED', actorId: reporter.id, note: parsed.data.reason })
+    // Who reported is in bounty_reports, for admins; the event never names them, whoever reads the trail.
+    if (inserted.length) await addEvent(tx, { bountyId: bounty.id, kind: 'REPORTED', note: parsed.data.reason })
   })
   return bounty
 }
@@ -914,13 +1118,35 @@ export async function setPayoutAccount(ctx: MoneyContext, user: User, raw: Payou
   const bank = (await provider.listBanks()).find((candidate) => candidate.code === input.bankCode)
   if (!bank) throw badInput('Choose a bank from the list.')
   const fingerprint = accountFingerprint(ctx.payments.fingerprintKey, input.bankCode, input.accountNumber)
-  const [taken] = await ctx.db.select({ userId: payoutAccounts.userId }).from(payoutAccounts).where(and(eq(payoutAccounts.fingerprint, fingerprint), eq(payoutAccounts.status, 'ACTIVE')))
-  if (taken && taken.userId !== user.id) throw badInput('That bank account is already linked to another CIVIC/ONE account.')
-  if (taken) return (await activePayoutAccount(ctx.db, user.id))!
+  // A bank account stays tied to the person who first linked it, replaced or not. The answer doesn't say whose it is.
+  const [known] = await ctx.db.select().from(payoutAccounts).where(eq(payoutAccounts.fingerprint, fingerprint))
+  if (known && known.userId !== null && known.userId !== user.id) throw badInput('That bank account can’t be linked to this CIVIC/ONE account.')
+  if (known?.status === 'ACTIVE' && known.userId === user.id) return known
 
-  const recipient = await provider.createRecipient({ name: input.accountName, accountNumber: input.accountNumber, bankCode: input.bankCode })
+  const recipient =
+    known?.userId === user.id
+      ? { recipientCode: known.recipientCode, accountName: known.accountName }
+      : await provider.createRecipient({ name: input.accountName, accountNumber: input.accountNumber, bankCode: input.bankCode })
   return ctx.db.transaction(async (tx) => {
     await tx.update(payoutAccounts).set({ status: 'REPLACED', replacedAt: new Date() }).where(and(eq(payoutAccounts.userId, user.id), eq(payoutAccounts.status, 'ACTIVE')))
+    if (known) {
+      // Their own earlier account comes back as it was (its hold was served); one left behind by a deleted account starts the hold again.
+      const [row] = await tx
+        .update(payoutAccounts)
+        .set({
+          userId: user.id,
+          provider: provider.name,
+          recipientCode: recipient.recipientCode,
+          bankName: bank.name,
+          accountName: recipient.accountName ?? input.accountName,
+          status: 'ACTIVE',
+          replacedAt: null,
+          createdAt: known.userId === user.id ? known.createdAt : new Date(),
+        })
+        .where(eq(payoutAccounts.id, known.id))
+        .returning()
+      return row!
+    }
     const [row] = await tx
       .insert(payoutAccounts)
       .values({
@@ -940,7 +1166,12 @@ export async function setPayoutAccount(ctx: MoneyContext, user: User, raw: Payou
 
 /* Provider events (webhooks) */
 
-/** Records the event first; a redelivery finds the row and does nothing. Returns what happened, for the row. */
+/**
+ * Records the event first, then applies it. A redelivery finds the row and does
+ * nothing, unless the earlier attempt never finished (the row still says
+ * RECEIVED): then the redelivery is the retry, which is safe because every
+ * apply step is idempotent on the ledger. Returns what happened, for the row.
+ */
 export async function handleProviderEvent(ctx: MoneyContext, event: ProviderEvent, payload: string): Promise<string> {
   const provider = ctx.payments.provider
   if (!provider) return 'IGNORED'
@@ -949,9 +1180,17 @@ export async function handleProviderEvent(ctx: MoneyContext, event: ProviderEven
     .values({ provider: provider.name, eventKey: event.eventKey, eventType: event.eventType, reference: 'reference' in event ? event.reference : 'transactionRef' in event ? event.transactionRef : null, payload })
     .onConflictDoNothing()
     .returning({ id: paymentEvents.id })
-  if (!inserted.length) return 'DUPLICATE'
+  let id = inserted[0]?.id
+  if (!id) {
+    const [earlier] = await ctx.db
+      .select({ id: paymentEvents.id, outcome: paymentEvents.outcome })
+      .from(paymentEvents)
+      .where(and(eq(paymentEvents.provider, provider.name), eq(paymentEvents.eventKey, event.eventKey)))
+    if (!earlier || earlier.outcome !== 'RECEIVED') return 'DUPLICATE'
+    id = earlier.id
+  }
   const outcome = await applyProviderEvent(ctx, event)
-  await ctx.db.update(paymentEvents).set({ outcome }).where(eq(paymentEvents.id, inserted[0]!.id))
+  await ctx.db.update(paymentEvents).set({ outcome }).where(eq(paymentEvents.id, id))
   return outcome
 }
 
@@ -974,39 +1213,71 @@ async function applyProviderEvent(ctx: MoneyContext, event: ProviderEvent): Prom
       await applyRefund(ctx, { transactionRef: event.transactionRef, status: event.status, providerRef: event.providerRef })
       return 'APPLIED'
     case 'CHARGEBACK':
-      return applyChargeback(ctx, event.transactionRef, event.status)
+      return applyChargeback(ctx, event.transactionRef, event.status, event.resolution ?? null)
     default:
       return 'IGNORED'
   }
 }
 
-/** A card dispute: nothing moves until it's resolved, and the poster's bounty is hidden. */
-async function applyChargeback(ctx: MoneyContext, transactionRef: string, status: 'CREATED' | 'RESOLVED'): Promise<string> {
-  const [deposit] = await ctx.db.select().from(ledgerEntries).where(and(eq(ledgerEntries.providerRef, transactionRef), eq(ledgerEntries.type, 'DEPOSIT')))
+/**
+ * A card dispute over a deposit. Opening one freezes the bounty: nothing moves
+ * while the bank decides. When it closes with the cardholder getting the money
+ * back, the bounty closes without a refund of its own (the bank made one); any
+ * other outcome is left to an admin, who releases the hold once the Paystack
+ * dashboard shows the dispute closed in CIVIC/ONE's favour.
+ */
+async function applyChargeback(ctx: MoneyContext, transactionRef: string, status: 'CREATED' | 'REMINDED' | 'RESOLVED', resolution: string | null): Promise<string> {
+  const deposit = await depositByRef(ctx.db, transactionRef)
   if (!deposit) return 'UNKNOWN_REFERENCE'
-  const bounty = await bountyById(ctx.db, deposit.bountyId)
-  if (!bounty) return 'UNKNOWN_REFERENCE'
+  if (status === 'REMINDED') return 'IGNORED'
   await ctx.db.transaction(async (tx) => {
-    await tx
-      .insert(ledgerEntries)
-      .values({
-        bountyId: bounty.id,
-        userId: deposit.userId,
-        type: status === 'CREATED' ? 'CHARGEBACK' : 'CHARGEBACK_REVERSED',
-        status: 'SETTLED',
-        amountCents: deposit.amountCents,
-        currency: deposit.currency,
-        provider: deposit.provider,
-        reference: `cbk-${deposit.reference}-${status === 'CREATED' ? 'open' : 'closed'}`,
-        providerRef: transactionRef,
-        idempotencyKey: `chargeback:${deposit.id}:${status}`,
-        settledAt: new Date(),
-      })
-      .onConflictDoNothing()
-    await addEvent(tx, { bountyId: bounty.id, kind: 'CHARGEBACK', note: status === 'CREATED' ? 'The poster’s bank opened a dispute over the payment' : 'The dispute was resolved' })
-    if (status === 'CREATED' && ['OPEN', 'AWAITING_VERIFICATION', 'PENDING_REVIEW'].includes(bounty.status)) {
-      await tx.update(bounties).set({ status: 'FROZEN', frozenFromStatus: bounty.status }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, bounty.status)))
+    const [bounty] = await tx.select().from(bounties).where(eq(bounties.id, deposit.bountyId)).for('update')
+    if (!bounty) return
+    if (status === 'CREATED') {
+      await tx
+        .insert(ledgerEntries)
+        .values({
+          bountyId: bounty.id,
+          userId: deposit.userId,
+          type: 'CHARGEBACK',
+          status: 'SETTLED',
+          amountCents: deposit.amountCents,
+          currency: deposit.currency,
+          provider: deposit.provider,
+          reference: `cbk-${deposit.reference}-open`,
+          providerRef: deposit.providerRef,
+          idempotencyKey: `chargeback:${deposit.id}:CREATED`,
+          settledAt: new Date(),
+          note: 'The poster’s bank opened a dispute over the payment',
+        })
+        .onConflictDoNothing()
+      await addEvent(tx, { bountyId: bounty.id, kind: 'CHARGEBACK', note: 'The poster’s bank opened a dispute over the payment' })
+      if (['OPEN', 'AWAITING_VERIFICATION', 'PENDING_REVIEW'].includes(bounty.status)) {
+        await tx.update(bounties).set({ status: 'FROZEN', frozenFromStatus: bounty.status }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, bounty.status)))
+        await addEvent(tx, { bountyId: bounty.id, kind: 'FROZEN', byAdmin: true, recipientId: bounty.posterId, note: 'Your bank opened a dispute over the payment, so the bounty is on hold until it’s resolved.' })
+      }
+      return
     }
+    // Paystack names the outcome in `resolution`: "merchant-accepted" and "auto-accepted" mean the cardholder got the money back.
+    if (!/accepted/i.test(resolution ?? '')) {
+      await addEvent(tx, { bountyId: bounty.id, kind: 'CHARGEBACK', note: `The dispute was resolved (${resolution || 'no resolution given'}). Check it in the Paystack dashboard and release the hold once the money is confirmed back.` })
+      return
+    }
+    await addEvent(tx, { bountyId: bounty.id, kind: 'CHARGEBACK', note: `The dispute closed in the cardholder’s favour (${resolution}): the bank returned the payment` })
+    const [queued] = await tx
+      .select({ n: sql<number>`coalesce(sum(${ledgerEntries.amountCents}), 0)::int` })
+      .from(ledgerEntries)
+      .where(and(eq(ledgerEntries.bountyId, bounty.id), eq(ledgerEntries.type, 'REFUND'), eq(ledgerEntries.status, 'PENDING')))
+    const remaining = bounty.depositedCents - bounty.releasedCents - bounty.refundedCents - (queued?.n ?? 0)
+    // Paid out already: the loss is CIVIC/ONE's, and on record.
+    if (!FUNDED.includes(bounty.status) || remaining <= 0) return
+    // The money went back through the bank: it counts as refunded, and the bounty closes without a refund of its own.
+    await tx
+      .update(bounties)
+      .set({ status: 'CANCELLED', closedAt: new Date(), winningClaimId: null, frozenFromStatus: null, refundedCents: bounty.refundedCents + remaining })
+      .where(and(eq(bounties.id, bounty.id), eq(bounties.status, bounty.status)))
+    await addEvent(tx, { bountyId: bounty.id, kind: 'CANCELLED', byAdmin: true, recipientId: bounty.posterId, isPublic: true, note: 'Your bank reversed the payment, so the bounty is closed' })
+    await closeLiveClaims(tx, bounty.id, 'The bounty was closed')
   })
   return 'APPLIED'
 }
@@ -1019,66 +1290,86 @@ export interface SweepReport {
   expiring: number
   escalated: number
   redriven: number
+  scrubbed: number
 }
 
 export async function sweep(ctx: MoneyContext): Promise<SweepReport> {
   const now = new Date()
-  const report: SweepReport = { abandoned: 0, expired: 0, expiring: 0, escalated: 0, redriven: 0 }
+  const report: SweepReport = { abandoned: 0, expired: 0, expiring: 0, escalated: 0, redriven: 0, scrubbed: 0 }
+  // Each step runs on its own: a failure in one never keeps money from moving in another.
+  const step = async (name: string, run: () => Promise<void>) => {
+    try {
+      await run()
+    } catch (error) {
+      console.error(`[bounties] sweep step failed: ${name}`, error)
+    }
+  }
 
   // Checkouts nobody completed.
-  const stale = await ctx.db.select().from(bounties).where(and(eq(bounties.status, 'PENDING_PAYMENT'), lt(bounties.createdAt, new Date(now.getTime() - hours(PENDING_PAYMENT_TTL_HOURS)))))
-  for (const bounty of stale) {
-    const [updated] = await ctx.db.transaction(async (tx) => {
-      const deposit = await liveDeposit(tx, bounty.id)
-      if (deposit?.status === 'PENDING') await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Checkout not completed' }).where(eq(ledgerEntries.id, deposit.id))
-      return tx.update(bounties).set({ status: 'ABANDONED', closedAt: now }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'PENDING_PAYMENT'))).returning()
-    })
-    if (updated) report.abandoned++
-  }
+  await step('abandon unpaid bounties', async () => {
+    const stale = await ctx.db.select().from(bounties).where(and(eq(bounties.status, 'PENDING_PAYMENT'), lt(bounties.createdAt, new Date(now.getTime() - hours(PENDING_PAYMENT_TTL_HOURS)))))
+    for (const bounty of stale) {
+      const [updated] = await ctx.db.transaction(async (tx) => {
+        const deposit = await liveDeposit(tx, bounty.id)
+        if (deposit?.status === 'PENDING') {
+          await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Checkout not completed' }).where(and(eq(ledgerEntries.id, deposit.id), eq(ledgerEntries.status, 'PENDING')))
+        }
+        return tx.update(bounties).set({ status: 'ABANDONED', closedAt: now }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'PENDING_PAYMENT'))).returning()
+      })
+      if (updated) report.abandoned++
+    }
+  })
 
   // Open bounties past their date. Ones with a claim still being answered or disputable wait.
-  const dueBounties = await ctx.db.select().from(bounties).where(and(eq(bounties.status, 'OPEN'), lt(bounties.expiresAt, now)))
-  for (const bounty of dueBounties) {
-    if (await liveClaimCount(ctx.db, bounty.id)) continue
-    const refund = await ctx.db.transaction((tx) => closeAndRefund(tx, bounty, 'EXPIRED', 'EXPIRED', 'The bounty ran out of time', null))
-    if (refund) await sendRefund(ctx, refund)
-    report.expired++
-  }
+  await step('expire', async () => {
+    const dueBounties = await ctx.db.select().from(bounties).where(and(eq(bounties.status, 'OPEN'), lt(bounties.expiresAt, now)))
+    for (const bounty of dueBounties) {
+      if (await liveClaimCount(ctx.db, bounty.id)) continue
+      const refund = await ctx.db.transaction((tx) => closeAndRefund(tx, bounty, 'EXPIRED', 'EXPIRED', 'The bounty ran out of time', null))
+      if (refund) await sendRefund(ctx, refund)
+      report.expired++
+    }
+  })
 
   // A reminder a few days before expiry.
-  const soon = await ctx.db
-    .select()
-    .from(bounties)
-    .where(and(eq(bounties.status, 'OPEN'), isNull(bounties.expiringNotifiedAt), lt(bounties.expiresAt, new Date(now.getTime() + days(BOUNTY_EXPIRING_DAYS)))))
-  for (const bounty of soon) {
-    await ctx.db.transaction(async (tx) => {
-      await addEvent(tx, { bountyId: bounty.id, kind: 'EXPIRING', recipientId: bounty.posterId, note: `Expires ${bounty.expiresAt?.toISOString() ?? ''}` })
-      await tx.update(bounties).set({ expiringNotifiedAt: now }).where(eq(bounties.id, bounty.id))
-    })
-    report.expiring++
-  }
+  await step('remind', async () => {
+    const soon = await ctx.db
+      .select()
+      .from(bounties)
+      .where(and(eq(bounties.status, 'OPEN'), isNull(bounties.expiringNotifiedAt), lt(bounties.expiresAt, new Date(now.getTime() + days(BOUNTY_EXPIRING_DAYS)))))
+    for (const bounty of soon) {
+      await ctx.db.transaction(async (tx) => {
+        await addEvent(tx, { bountyId: bounty.id, kind: 'EXPIRING', recipientId: bounty.posterId, note: `Expires ${bounty.expiresAt?.toISOString() ?? ''}` })
+        await tx.update(bounties).set({ expiringNotifiedAt: now }).where(eq(bounties.id, bounty.id))
+      })
+      report.expiring++
+    }
+  })
 
   // Claims the poster hasn't answered go to an admin.
-  const silent = await ctx.db
-    .select({ claim: bountyClaims, bounty: bounties })
-    .from(bountyClaims)
-    .innerJoin(bounties, eq(bounties.id, bountyClaims.bountyId))
-    .where(and(eq(bountyClaims.status, 'SUBMITTED'), eq(bounties.status, 'OPEN'), lt(bountyClaims.createdAt, new Date(now.getTime() - days(CLAIM_POSTER_RESPONSE_DAYS)))))
-  for (const { claim, bounty } of silent) {
-    await ctx.db.transaction(async (tx) => {
-      const [updated] = await tx
-        .update(bountyClaims)
-        .set({ status: 'DISPUTED', disputedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind), disputeNote: `The poster didn’t answer within ${CLAIM_POSTER_RESPONSE_DAYS} days` })
-        .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'SUBMITTED')))
-        .returning()
-      if (updated) await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_ESCALATED', recipientId: claim.claimantId, note: 'The poster didn’t answer, so CIVIC/ONE will decide' })
-    })
-    report.escalated++
-  }
+  await step('escalate', async () => {
+    const silent = await ctx.db
+      .select({ claim: bountyClaims, bounty: bounties })
+      .from(bountyClaims)
+      .innerJoin(bounties, eq(bounties.id, bountyClaims.bountyId))
+      .where(and(eq(bountyClaims.status, 'SUBMITTED'), eq(bounties.status, 'OPEN'), lt(bountyClaims.createdAt, new Date(now.getTime() - days(CLAIM_POSTER_RESPONSE_DAYS)))))
+    for (const { claim, bounty } of silent) {
+      await ctx.db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(bountyClaims)
+          .set({ status: 'DISPUTED', disputedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind), disputeNote: `The poster didn’t answer within ${CLAIM_POSTER_RESPONSE_DAYS} days` })
+          .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'SUBMITTED')))
+          .returning()
+        if (updated) await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_ESCALATED', recipientId: claim.claimantId, note: 'The poster didn’t answer, so CIVIC/ONE will decide' })
+      })
+      report.escalated++
+    }
+  })
 
   // Money the provider was asked to move but never confirmed: ask again.
-  const provider = ctx.payments.provider
-  if (provider) {
+  await step('re-drive pending money', async () => {
+    const provider = ctx.payments.provider
+    if (!provider) return
     const pending = await ctx.db.select().from(ledgerEntries).where(and(eq(ledgerEntries.status, 'PENDING'), lt(ledgerEntries.createdAt, new Date(now.getTime() - hours(1)))))
     for (const entry of pending) {
       try {
@@ -1089,13 +1380,36 @@ export async function sweep(ctx: MoneyContext): Promise<SweepReport> {
           await sendTransfer(ctx, entry)
         } else if (entry.type === 'REFUND' && !entry.providerRef) {
           await sendRefund(ctx, entry)
+        } else if (entry.type === 'REFUND' && provider.fetchRefund) {
+          // Sent, and nothing heard since (a lost webhook): ask how it went.
+          const result = await provider.fetchRefund(entry.providerRef!)
+          if (result && result.status !== 'PENDING') await applyRefund(ctx, { reference: entry.reference, status: result.status, providerRef: result.providerRef ?? entry.providerRef })
         }
         report.redriven++
       } catch (error) {
         console.error('[bounties] sweep could not re-drive', { reference: entry.reference, error })
       }
     }
-  }
+  })
+
+  // What the privacy policy promises: a missing person's details go a week after the bounty closes, claim text a year after.
+  await step('retention', async () => {
+    const missing = await ctx.db
+      .update(bounties)
+      .set({ title: 'Missing person (details removed)', body: '', area: null, relationship: null })
+      .where(and(eq(bounties.kind, 'MISSING_PERSON'), inArray(bounties.status, CLOSED), lt(bounties.closedAt, new Date(now.getTime() - days(MISSING_PERSON_TEXT_RETENTION_DAYS))), ne(bounties.body, '')))
+      .returning({ id: bounties.id })
+    const old = ctx.db
+      .select({ id: bounties.id })
+      .from(bounties)
+      .where(and(inArray(bounties.status, CLOSED), lt(bounties.closedAt, new Date(now.getTime() - days(CLAIM_TEXT_RETENTION_DAYS)))))
+    const claims = await ctx.db
+      .update(bountyClaims)
+      .set({ body: '', links: '' })
+      .where(and(inArray(bountyClaims.bountyId, old), ne(bountyClaims.body, ''), or(isNull(bountyClaims.decisionReason), ne(bountyClaims.decisionReason, 'LEGAL_HOLD'))))
+      .returning({ id: bountyClaims.id })
+    report.scrubbed = missing.length + claims.length
+  })
   return report
 }
 
@@ -1109,10 +1423,13 @@ export async function bountyById(db: Database, id: string): Promise<Bounty | nul
 
 /** Whether someone may open this bounty's page. */
 export function canSeeBounty(bounty: Bounty, viewer: User | null, isAdmin: boolean, hasClaim: boolean): boolean {
-  if (isAdmin) return true
+  if (isAdmin || hasClaim) return true
   if (viewer && bounty.posterId === viewer.id) return true
-  if (LISTED.includes(bounty.status) || bounty.status === 'CANCELLED' || bounty.status === 'EXPIRED') return true
-  return hasClaim
+  if (bounty.removedAt) return false
+  if (LISTED.includes(bounty.status)) return true
+  // A closed bounty's page still explains a shared link, as long as it was ever on the board: one declined
+  // in review, or cancelled before review, was never public and stays that way.
+  return (bounty.status === 'CANCELLED' || bounty.status === 'EXPIRED') && bounty.listedAt !== null
 }
 
 const boardOrder = (cursor: { createdAt: string; id: string } | null): SQL | undefined =>
@@ -1133,17 +1450,17 @@ async function pageBounties(db: Database, where: SQL | undefined, args: PageArgs
 /** The public board: open bounties (and ones being paid), or the honoured ones. Expired-but-unswept ones stay off it. */
 export function pageBoard(db: Database, { kind, honoured }: { kind?: BountyKind | null; honoured?: boolean | null }, args: PageArgs) {
   const live = honoured ? eq(bounties.status, 'PAID') : and(inArray(bounties.status, ['OPEN', 'AWAITING_VERIFICATION', 'RELEASING']), or(ne(bounties.status, 'OPEN'), gt(bounties.expiresAt, new Date())))
-  return pageBounties(db, and(live, kind ? eq(bounties.kind, kind) : undefined), args)
+  return pageBounties(db, and(live, isNull(bounties.removedAt), kind ? eq(bounties.kind, kind) : undefined), args)
 }
 
 export const pageMyBounties = (db: Database, posterId: string, args: PageArgs) => pageBounties(db, eq(bounties.posterId, posterId), args)
 
 /** A profile's bounties: what's on the board, plus everything to its owner. */
 export const pageUserBounties = (db: Database, userId: string, own: boolean, args: PageArgs) =>
-  pageBounties(db, and(eq(bounties.posterId, userId), own ? undefined : inArray(bounties.status, LISTED)), args)
+  pageBounties(db, and(eq(bounties.posterId, userId), own ? undefined : and(inArray(bounties.status, LISTED), isNull(bounties.removedAt))), args)
 
 export async function countUserBounties(db: Database, userId: string): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(bounties).where(and(eq(bounties.posterId, userId), inArray(bounties.status, LISTED)))
+  const [row] = await db.select({ n: count() }).from(bounties).where(and(eq(bounties.posterId, userId), inArray(bounties.status, LISTED), isNull(bounties.removedAt)))
   return row?.n ?? 0
 }
 
@@ -1159,31 +1476,47 @@ export async function pageMyClaims(db: Database, claimantId: string, args: PageA
   return toConnection(rows, limit, cursor !== null)
 }
 
-/** Everything an admin should look at: reviews, confirmed claims, disputes, failed payouts, holds, reports, cancellation requests. */
+/**
+ * Everything an admin should look at: reviews, confirmed claims, disputes,
+ * failed payouts, holds, reports, cancellation requests, and money that is
+ * still owed or unexplained on a bounty whatever its status (a failed refund,
+ * a payment that didn't match).
+ */
 export function pageAdminQueue(db: Database, args: PageArgs) {
   const disputed = db.select({ id: bountyClaims.bountyId }).from(bountyClaims).where(eq(bountyClaims.status, 'DISPUTED'))
   const reported = db.select({ id: bountyReports.bountyId }).from(bountyReports)
-  const failed = db.select({ id: ledgerEntries.bountyId }).from(ledgerEntries).where(and(eq(ledgerEntries.type, 'RELEASE'), eq(ledgerEntries.status, 'FAILED')))
+  const failedPayout = db.select({ id: ledgerEntries.bountyId }).from(ledgerEntries).where(and(eq(ledgerEntries.type, 'RELEASE'), eq(ledgerEntries.status, 'FAILED')))
+  const failedRefund = db.select({ id: ledgerEntries.bountyId }).from(ledgerEntries).where(and(eq(ledgerEntries.type, 'REFUND'), eq(ledgerEntries.status, 'FAILED')))
   const mismatched = db.select({ id: ledgerEntries.bountyId }).from(ledgerEntries).where(eq(ledgerEntries.status, 'MISMATCH'))
   const cancelRequested = db.select({ id: bountyEvents.bountyId }).from(bountyEvents).where(eq(bountyEvents.kind, 'CANCEL_REQUESTED'))
+  const owed = sql`${bounties.depositedCents} - ${bounties.releasedCents} - ${bounties.refundedCents} > 0`
   return pageBounties(
     db,
-    and(
-      inArray(bounties.status, [...FUNDED, 'PENDING_PAYMENT']),
-      or(
-        inArray(bounties.status, ['PENDING_REVIEW', 'AWAITING_VERIFICATION', 'RELEASING', 'FROZEN']),
-        inArray(bounties.id, disputed),
-        inArray(bounties.id, reported),
-        inArray(bounties.id, failed),
-        inArray(bounties.id, mismatched),
-        inArray(bounties.id, cancelRequested),
+    or(
+      and(
+        inArray(bounties.status, [...FUNDED, 'PENDING_PAYMENT']),
+        or(
+          inArray(bounties.status, ['PENDING_REVIEW', 'AWAITING_VERIFICATION', 'RELEASING', 'FROZEN']),
+          inArray(bounties.id, disputed),
+          inArray(bounties.id, reported),
+          inArray(bounties.id, failedPayout),
+          inArray(bounties.id, cancelRequested),
+        ),
       ),
+      and(owed, inArray(bounties.id, failedRefund)),
+      inArray(bounties.id, mismatched),
     ),
     args,
   )
 }
 
-export const claimsFor = (db: Database, bountyId: string) => db.select().from(bountyClaims).where(eq(bountyClaims.bountyId, bountyId)).orderBy(asc(bountyClaims.createdAt))
+/** A bounty's claims, oldest first. Withdrawn ones are kept for admins only: the claimant was told the poster won't see them. */
+export const claimsFor = (db: Database, bountyId: string, withdrawn = false) =>
+  db
+    .select()
+    .from(bountyClaims)
+    .where(and(eq(bountyClaims.bountyId, bountyId), withdrawn ? undefined : ne(bountyClaims.status, 'WITHDRAWN')))
+    .orderBy(asc(bountyClaims.createdAt))
 
 export async function viewerClaim(db: Database, bountyId: string, viewerId: string): Promise<BountyClaim | null> {
   const [row] = await db
@@ -1195,11 +1528,17 @@ export async function viewerClaim(db: Database, bountyId: string, viewerId: stri
   return row ?? null
 }
 
-export const eventsFor = (db: Database, bountyId: string, all: boolean) =>
+/** The trail as one viewer may see it: all of it for admins; for anyone else the public part, plus what was addressed to them or done by them. */
+export const eventsFor = (db: Database, bountyId: string, viewer: { all: boolean; id: string | null }) =>
   db
     .select()
     .from(bountyEvents)
-    .where(and(eq(bountyEvents.bountyId, bountyId), all ? undefined : eq(bountyEvents.isPublic, true)))
+    .where(
+      and(
+        eq(bountyEvents.bountyId, bountyId),
+        viewer.all ? undefined : or(eq(bountyEvents.isPublic, true), ...(viewer.id ? [eq(bountyEvents.recipientId, viewer.id), eq(bountyEvents.actorId, viewer.id)] : [])),
+      ),
+    )
     .orderBy(asc(bountyEvents.createdAt))
 
 export const reportsFor = (db: Database, bountyId: string) => db.select().from(bountyReports).where(eq(bountyReports.bountyId, bountyId)).orderBy(asc(bountyReports.createdAt))
@@ -1216,9 +1555,12 @@ export const latestReleaseFor = async (db: Database, bountyId: string): Promise<
   return row ?? null
 }
 
-/** Bounties that stop an account being deleted: money is held for or owed to it. */
+/** Bounties that stop an account being deleted: money is held for or owed to it (a refund still to come, or one that failed). */
 export async function heldForUser(db: Database, userId: string): Promise<string[]> {
-  const posted = db.select({ id: bounties.id }).from(bounties).where(and(eq(bounties.posterId, userId), inArray(bounties.status, FUNDED)))
+  const posted = db
+    .select({ id: bounties.id })
+    .from(bounties)
+    .where(and(eq(bounties.posterId, userId), or(inArray(bounties.status, FUNDED), sql`${bounties.depositedCents} - ${bounties.releasedCents} - ${bounties.refundedCents} > 0`)))
   const claimed = db
     .select({ id: bountyClaims.bountyId })
     .from(bountyClaims)

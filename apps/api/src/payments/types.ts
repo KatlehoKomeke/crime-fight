@@ -49,12 +49,12 @@ export interface RefundResult {
   providerRef: string | null
 }
 
-/** A verified webhook, reduced to what the ledger acts on. */
+/** A verified webhook, reduced to what the ledger acts on. `transactionRef` is the transaction's reference, which is ours. */
 export type ProviderEvent =
   | { type: 'CHARGE_SUCCESS'; eventKey: string; eventType: string; reference: string }
   | { type: 'TRANSFER'; eventKey: string; eventType: string; reference: string; status: 'SUCCESS' | 'FAILED' | 'REVERSED'; providerRef: string | null }
   | { type: 'REFUND'; eventKey: string; eventType: string; transactionRef: string; status: RefundStatus; providerRef: string | null }
-  | { type: 'CHARGEBACK'; eventKey: string; eventType: string; transactionRef: string; status: 'CREATED' | 'RESOLVED' }
+  | { type: 'CHARGEBACK'; eventKey: string; eventType: string; transactionRef: string; status: 'CREATED' | 'REMINDED' | 'RESOLVED'; resolution: string | null }
   | { type: 'IGNORED'; eventKey: string; eventType: string }
 
 export interface PaymentProvider {
@@ -70,6 +70,8 @@ export interface PaymentProvider {
   /** Null when the provider has no transfer with that reference. */
   fetchTransfer(reference: string): Promise<TransferResult | null>
   refund(input: { transactionRef: string; amountCents: number; currency: string; note: string }): Promise<RefundResult>
+  /** How a refund the provider accepted went, by the provider's id for it; null when it has no such refund. */
+  fetchRefund?(providerRef: string): Promise<RefundResult | null>
   /** Null when the signature doesn't verify. */
   parseWebhook(rawBody: Buffer, signature: string | undefined): ProviderEvent | null
 }

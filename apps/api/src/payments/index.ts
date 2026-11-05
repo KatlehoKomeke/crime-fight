@@ -43,24 +43,36 @@ export async function resolvePayments(env: ApiEnv): Promise<Payments> {
     return { provider: sandboxProvider({ siteUrl }), siteUrl, fingerprintKey: 'sandbox', claimMinAccountAgeHours }
   }
   if (env.paymentsProvider === 'paystack') {
-    let secretKey = env.paystackSecretKey
-    let fingerprintKey: string | undefined
-    if (!secretKey && env.paystackSecretArn) {
-      const { SecretString } = await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: env.paystackSecretArn }))
-      const raw = (SecretString ?? '').trim()
-      if (raw.startsWith('{')) {
-        const parsed = JSON.parse(raw) as { secretKey?: string; fingerprintKey?: string }
-        secretKey = parsed.secretKey
-        fingerprintKey = parsed.fingerprintKey
-      } else {
-        secretKey = raw
-      }
+    try {
+      return { provider: paystackProvider(await paystackKeys(env, fingerprint)), siteUrl, fingerprintKey: fingerprint.key, claimMinAccountAgeHours }
+    } catch (error) {
+      // Bounties are one feature: a secret that can't be read switches them off for this container, with an error in the
+      // logs and `paymentsStatus: DISABLED` on the site (the deploy's smoke test expects the provider), not a dead API.
+      console.error('[payments] Paystack not configured; bounties are switched off until the next cold start', error)
+      return { provider: null, siteUrl, fingerprintKey: 'disabled', claimMinAccountAgeHours }
     }
-    if (!secretKey) throw new Error('No Paystack secret key found')
-    // One bank account, one person: the fingerprint key must outlive any key rotation, so it's its own value.
-    return { provider: paystackProvider(secretKey), siteUrl, fingerprintKey: fingerprintKey ?? secretKey, claimMinAccountAgeHours }
   }
   return { provider: null, siteUrl, fingerprintKey: 'disabled', claimMinAccountAgeHours }
+}
+
+const fingerprint = { key: '' }
+
+/** The Paystack secret key, and the fingerprint key beside it. Deployed, both come from the secret, and both are required. */
+async function paystackKeys(env: ApiEnv, out: { key: string }): Promise<string> {
+  if (env.paystackSecretKey) {
+    // Local only (PAYSTACK_SECRET_KEY inline): nothing to rotate, so the key may double as the fingerprint key.
+    out.key = env.paystackSecretKey
+    return env.paystackSecretKey
+  }
+  if (!env.paystackSecretArn) throw new Error('No Paystack secret key found')
+  const { SecretString } = await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: env.paystackSecretArn }))
+  const raw = (SecretString ?? '').trim()
+  const parsed = raw.startsWith('{') ? (JSON.parse(raw) as { secretKey?: string; fingerprintKey?: string }) : { secretKey: raw }
+  if (!parsed.secretKey) throw new Error('The Paystack secret has no secretKey')
+  // One bank account, one person: the fingerprint key must outlive any rotation of the Paystack key, so it is its own value.
+  if (!parsed.fingerprintKey) throw new Error('The Paystack secret has no fingerprintKey; store it as {"secretKey": "...", "fingerprintKey": "..."}')
+  out.key = parsed.fingerprintKey
+  return parsed.secretKey
 }
 
 export const disabledPayments = (siteUrl = 'http://localhost:8081'): Payments => ({ provider: null, siteUrl, fingerprintKey: 'disabled', claimMinAccountAgeHours: 72 })

@@ -82,6 +82,10 @@ export function sandboxProvider({ siteUrl }: { siteUrl: string }): SandboxProvid
       return Promise.resolve({ status: 'SETTLED', providerRef: `RFD_sandbox_${++counter}` })
     },
 
+    fetchRefund(providerRef) {
+      return Promise.resolve({ status: 'SETTLED', providerRef })
+    },
+
     parseWebhook: () => null,
   }
 }

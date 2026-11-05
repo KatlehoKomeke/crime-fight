@@ -141,6 +141,7 @@ export async function seed(db: Database): Promise<{ users: number; posts: number
         fundedAt: deposited ? fundedAt : null,
         expiresAt: deposited ? new Date(fundedAt.getTime() + b.durationDays * 24 * 60 * 60_000) : null,
         closedAt: b.status === 'PAID' ? ago(b.closedMinutesAgo ?? 0) : null,
+        listedAt: deposited && b.status !== 'PENDING_REVIEW' ? fundedAt : null,
         createdAt: ago(b.fundedMinutesAgo + 5),
       })
       .returning({ id: bounties.id })

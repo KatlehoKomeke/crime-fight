@@ -249,6 +249,6 @@ export function bountyEventText(event: BountyEventKind): string {
     case 'REPORTED':
       return 'Reported'
     case 'CHARGEBACK':
-      return 'The poster’s bank opened a payment dispute'
+      return 'Payment dispute with the poster’s bank'
   }
 }

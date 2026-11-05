@@ -87,4 +87,6 @@ jobs:
           echo "### ${{ inputs.stage }} deployed → $site" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Smoke test
+        env:
+          EXPECT_PAYMENTS: ${{ vars.PAYSTACK_SECRET_NAME != '' && '1' || '0' }}
         run: node scripts/smoke.mjs "${{ steps.outputs.outputs.site_url }}"

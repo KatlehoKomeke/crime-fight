@@ -37,8 +37,9 @@ export function loader(_request: ImmutableRequest | undefined, params: Record<st
   return prefetch((fetch) => fetch(BountyQuery, bountyVariables(param(params.id))))
 }
 
-/** Missing-person bounties keep their text out of previews and structured data: the card says "SAPS case open", not who. */
+/** Missing-person bounties keep their text out of titles, previews and structured data: the page says "missing person", not who. */
 const description = (bounty: { kind: string; body: string }) => (bounty.kind === 'MISSING_PERSON' ? PREVIEW_PAGES.bounties.description : excerpt(bounty.body))
+const headline = (bounty: { kind: string; title: string; amountCents: number }) => `${formatZar(bounty.amountCents)} bounty · ${bounty.kind === 'MISSING_PERSON' ? 'Missing person, SAPS case open' : excerpt(bounty.title, 60)}`
 
 export async function generateMetadata(_request: ImmutableRequest | undefined, params: Record<string, string | string[]>) {
   const id = param(params.id)
@@ -51,7 +52,7 @@ export async function generateMetadata(_request: ImmutableRequest | undefined, p
   })
   if (!bounty) return pageMetadata({ title: 'Bounty not found', path, noindex: true })
   return pageMetadata({
-    title: `${formatZar(bounty.amountCents)} bounty · ${excerpt(bounty.title, 60)}`,
+    title: headline(bounty),
     description: description(bounty),
     path,
     type: 'article',
@@ -73,7 +74,7 @@ export default function BountyScreen() {
 
   return (
     <Screen
-      title={bounty ? `${formatZar(bounty.amountCents)} bounty: ${bounty.title}` : 'Bounty'}
+      title={bounty ? headline(bounty) : 'Bounty'}
       header={<PageHeader title="Bounty" back right={bounty ? <BountyMenu bounty={bounty} poster={bounty.viewerIsPoster} signedIn={auth === 'signed-in'} /> : undefined} />}
     >
       {bounty ? (
@@ -81,7 +82,7 @@ export default function BountyScreen() {
           data={{
             '@context': 'https://schema.org',
             '@type': 'WebPage',
-            name: `${formatZar(bounty.amountCents)} bounty · ${excerpt(bounty.title, 60)}`,
+            name: headline(bounty),
             description: description(bounty),
             datePublished: bounty.createdAt,
           }}

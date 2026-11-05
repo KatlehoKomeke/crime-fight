@@ -42,8 +42,8 @@ function queueReasons(bounty: QueueBounty): string[] {
   }
   if (bounty.latestPayout?.status === 'FAILED') reasons.push('Payout failed — retry from the bounty')
   if (bounty.reports.length > 0) reasons.push(`${bounty.reports.length} ${bounty.reports.length === 1 ? 'report' : 'reports'}`)
-  // The queue also holds cancellation requests and payment mismatches, which the row doesn't carry.
-  if (reasons.length === 0) reasons.push('Cancellation request or payment mismatch — open the bounty')
+  // The queue also holds cancellation requests, failed refunds and payment mismatches, which the row doesn't carry.
+  if (reasons.length === 0) reasons.push('Cancellation request, failed refund or payment mismatch — open the bounty')
   return reasons
 }
 
@@ -65,7 +65,9 @@ export default function ReviewScreen() {
     const result = await sweep({})
     const report = result.data?.sweepBounties
     setConfirmSweep(false)
-    if (report) toast(`Sweep done: ${report.expired} expired, ${report.abandoned} abandoned, ${report.escalated} escalated, ${report.expiring} expiring, ${report.redriven} re-driven`)
+    if (report) {
+      toast(`Sweep done: ${report.expired} expired, ${report.abandoned} abandoned, ${report.escalated} escalated, ${report.expiring} expiring, ${report.redriven} re-driven, ${report.scrubbed} texts removed`)
+    }
     else toast(result.error?.graphQLErrors[0]?.message ?? 'The sweep didn’t run')
   }
 

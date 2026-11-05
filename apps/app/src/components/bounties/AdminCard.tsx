@@ -13,7 +13,7 @@ import { Link } from 'expo-router'
 import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { type CombinedError, useMutation } from 'urql'
-import { AdminCancelBounty, ApproveBounty, DecideClaim, DeclineBounty, FreezeBounty, RetryBountyPayout, UnfreezeBounty } from '@/graphql/documents'
+import { AdminCancelBounty, ApproveBounty, DecideClaim, DeclineBounty, FreezeBounty, RetryBountyPayout, RetryBountyRefund, UnfreezeBounty } from '@/graphql/documents'
 import { claimStatusLabel, claimTone, decisionLabel, formatDate, formatDateTime, timeUntil, toneColor } from '@/lib/bounty-copy'
 import { profilePath } from '@/lib/profile'
 import { fonts, radius, useColors } from '@/theme'
@@ -153,9 +153,14 @@ function AdminClaim({ claim, bounty }: { claim: Claim; bounty: Bounty }) {
         {claimStatusLabel(claim.status)} · sent {formatRelativeTime(claim.createdAt)}
       </Txt>
       <ClaimText claim={claim} />
+      {claim.confirmNote ? (
+        <Txt variant="small" color="textMuted">
+          Poster’s note to the reviewer: “{claim.confirmNote}”
+        </Txt>
+      ) : null}
       {claim.posterNote ? (
         <Txt variant="small" color="textMuted">
-          Poster’s note: “{claim.posterNote}”
+          Poster’s reason for declining: “{claim.posterNote}”
         </Txt>
       ) : null}
       {claim.disputeNote ? (
@@ -250,7 +255,8 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
         open={dialog === 'verify'}
         title={`Pay ${amount} to ${handle}${account ? ` (${account.bankName} •••• ${account.accountLast4}, “${account.accountName}”)` : ''}?`}
         body="This sends the transfer now."
-        label="Note for the record"
+        label="Note to both parties"
+        hint="The claimant and the poster see this with the decision."
         placeholder="What you checked"
         confirmLabel="Pay now"
         confirmTone="accent"
@@ -270,7 +276,8 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
         open={dialog === 'reject'}
         title="Reject this claim?"
         body="The claimant is told the reason. If this is the confirmed claim, the bounty goes back to taking claims."
-        label="Note for the record"
+        label="Note to the claimant"
+        hint="The claimant sees this with the reason; the poster sees the reason only."
         placeholder="What was missing"
         confirmLabel="Reject claim"
         confirmTone="danger"
@@ -296,24 +303,47 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
   )
 }
 
-type BountyDialog = 'approve' | 'decline' | 'cancel' | 'freeze' | 'unfreeze' | 'retry' | null
+type BountyDialog = 'approve' | 'decline' | 'cancel' | 'freeze' | 'unfreeze' | 'retry' | 'refund' | null
+
+interface NoteAction {
+  title: string
+  body: string
+  label: string
+  hint: string
+  confirmLabel: string
+  tone: 'primary' | 'danger'
+  done: string
+  action: (note: string) => Promise<Outcome>
+}
 
 function BountyActions({ bounty }: { bounty: Bounty }) {
+  const c = useColors()
   const toast = useToast()
   const [dialog, setDialog] = useState<BountyDialog>(null)
+  const [takeDown, setTakeDown] = useState(false)
   const [approving, approve] = useMutation(ApproveBounty)
   const [declining, decline] = useMutation(DeclineBounty)
   const [cancelling, cancel] = useMutation(AdminCancelBounty)
   const [freezing, freeze] = useMutation(FreezeBounty)
   const [unfreezing, unfreeze] = useMutation(UnfreezeBounty)
   const [retrying, retry] = useMutation(RetryBountyPayout)
-  const busy = approving.fetching || declining.fetching || cancelling.fetching || freezing.fetching || unfreezing.fetching || retrying.fetching
+  const [refunding, refund] = useMutation(RetryBountyRefund)
+  const busy = approving.fetching || declining.fetching || cancelling.fetching || freezing.fetching || unfreezing.fetching || retrying.fetching || refunding.fetching
   const amount = formatZar(bounty.amountCents)
   const id = bounty.id
 
   const canFreeze = ['OPEN', 'AWAITING_VERIFICATION', 'PENDING_REVIEW'].includes(bounty.status)
-  const canCancel = canFreeze || bounty.status === 'FROZEN'
-  const canRetry = bounty.status === 'RELEASING' && bounty.latestPayout?.status === 'FAILED'
+  const payoutFailed = bounty.status === 'RELEASING' && bounty.latestPayout?.status === 'FAILED'
+  // Out of RELEASING only when the payout failed and has nowhere to go; otherwise the claimant is owed.
+  const canCancel = canFreeze || bounty.status === 'FROZEN' || payoutFailed
+  const latestRefund = bounty.ledger.filter((entry) => entry.type === 'REFUND').at(-1)
+  const canRetryRefund = latestRefund?.status === 'FAILED'
+  // A card dispute the bank hasn't closed: a CHARGEBACK row with no CHARGEBACK_REVERSED after it.
+  const dispute = bounty.ledger.filter((entry) => entry.type === 'CHARGEBACK').length > bounty.ledger.filter((entry) => entry.type === 'CHARGEBACK_REVERSED').length
+  const winner = bounty.claims.find((claim) => claim.id === bounty.winningClaim?.id)
+  const account = winner?.payoutAccount
+  // The same rule as the first payout: never to an account added minutes ago.
+  const retryBlocker = !payoutFailed ? null : !account ? 'The claimant hasn’t added a bank account' : inFuture(account.readyAt) ? `The claimant’s bank account is ready ${timeUntil(account.readyAt)}` : null
 
   const run = async (action: () => Promise<Outcome>, done: string) => {
     const result = await action()
@@ -321,34 +351,73 @@ function BountyActions({ bounty }: { bounty: Bounty }) {
     setDialog(null)
   }
 
-  const noteDialogs: Record<Exclude<BountyDialog, 'retry' | null>, { title: string; body: string; confirmLabel: string; tone: 'primary' | 'danger'; done: string; action: (note: string) => Promise<Outcome> }> = {
-    approve: { title: 'Approve and list this bounty?', body: 'It goes on the board now and the poster is told.', confirmLabel: 'Approve and list', tone: 'primary', done: 'Bounty approved and listed.', action: (note) => approve({ id, note }) },
-    decline: { title: 'Decline this bounty?', body: `${amount} is refunded to the poster, who is told your note.`, confirmLabel: 'Decline and refund', tone: 'danger', done: 'Refund started.', action: (note) => decline({ id, note }) },
-    cancel: { title: 'Cancel and refund this bounty?', body: `${amount} goes back to the poster and every live claim is closed.`, confirmLabel: 'Cancel and refund', tone: 'danger', done: 'Refund started.', action: (note) => cancel({ id, note }) },
-    freeze: { title: 'Put this bounty on hold?', body: 'It leaves the board and nothing moves until the hold is released. Time on hold doesn’t count against it.', confirmLabel: 'Put on hold', tone: 'danger', done: 'Bounty on hold.', action: (note) => freeze({ id, note }) },
-    unfreeze: { title: 'Release the hold?', body: 'The bounty goes back to where it was.', confirmLabel: 'Release hold', tone: 'primary', done: 'Hold released.', action: (note) => unfreeze({ id, note }) },
+  const openCancel = () => {
+    // A held or reported bounty is usually being taken down; one cancelled at the poster's request stays readable.
+    setTakeDown(bounty.status === 'FROZEN' || bounty.reports.length > 0)
+    setDialog('cancel')
   }
-  const current = dialog && dialog !== 'retry' ? noteDialogs[dialog] : null
 
-  if (!(bounty.status === 'PENDING_REVIEW' || canFreeze || canCancel || canRetry)) return null
+  // Every note goes to the person it concerns; there is no private channel, so each label says who reads it.
+  const noteDialogs: Record<Exclude<BountyDialog, 'retry' | 'refund' | null>, NoteAction> = {
+    approve: { title: 'Approve and list this bounty?', body: 'It goes on the board now.', label: 'Note to the poster', hint: 'The poster sees this with the approval.', confirmLabel: 'Approve and list', tone: 'primary', done: 'Bounty approved and listed.', action: (note) => approve({ id, note }) },
+    decline: { title: 'Decline this bounty?', body: `${amount} is refunded to the poster.`, label: 'Note to the poster', hint: 'The poster sees this with the refund.', confirmLabel: 'Decline and refund', tone: 'danger', done: 'Refund started.', action: (note) => decline({ id, note }) },
+    cancel: {
+      title: 'Cancel and refund this bounty?',
+      body: `${amount} goes back to the poster and every live claim is closed.`,
+      label: 'Note to the poster',
+      hint: 'The poster sees this with the refund; claimants are told the bounty closed.',
+      confirmLabel: 'Cancel and refund',
+      tone: 'danger',
+      done: 'Refund started.',
+      action: (note) => cancel({ id, note, takeDown }),
+    },
+    freeze: { title: 'Put this bounty on hold?', body: 'It leaves the board and nothing moves until the hold is released. Time on hold doesn’t count against it.', label: 'Note to the poster', hint: 'The poster sees this with the hold.', confirmLabel: 'Put on hold', tone: 'danger', done: 'Bounty on hold.', action: (note) => freeze({ id, note }) },
+    unfreeze: {
+      title: 'Release the hold?',
+      body: dispute
+        ? 'A card dispute was opened over the payment. Release the hold only once the Paystack dashboard shows it closed in CIVIC/ONE’s favour: the money then counts as held again and the bounty goes back to where it was.'
+        : 'The bounty goes back to where it was.',
+      label: 'Note to the poster',
+      hint: 'The poster sees this when the bounty comes back.',
+      confirmLabel: 'Release hold',
+      tone: 'primary',
+      done: 'Hold released.',
+      action: (note) => unfreeze({ id, note }),
+    },
+  }
+  const current = dialog && dialog !== 'retry' && dialog !== 'refund' ? noteDialogs[dialog] : null
+
+  if (!(bounty.status === 'PENDING_REVIEW' || canFreeze || canCancel || payoutFailed || canRetryRefund)) return null
 
   return (
     <View style={styles.bountyActions}>
+      {dispute ? (
+        <Txt variant="small" style={[styles.notice, { color: c.danger }]}>
+          A card dispute is open over the payment. Nothing moves until the bank decides; a dispute lost closes the bounty by itself.
+        </Txt>
+      ) : null}
       {bounty.status === 'PENDING_REVIEW' ? (
         <>
           <Button label="Approve and list" icon="check" onPress={() => setDialog('approve')} />
           <Button label="Decline and refund" tone="danger" onPress={() => setDialog('decline')} />
         </>
       ) : null}
-      {canRetry ? <Button label="Retry payout" tone="outline" onPress={() => setDialog('retry')} /> : null}
+      {payoutFailed ? <Button label="Retry payout" tone="outline" disabled={retryBlocker !== null} onPress={() => setDialog('retry')} /> : null}
+      {canRetryRefund ? <Button label="Retry refund" tone="outline" onPress={() => setDialog('refund')} /> : null}
       {canFreeze ? <Button label="Put on hold" tone="outline" icon="lock" onPress={() => setDialog('freeze')} /> : null}
       {bounty.status === 'FROZEN' ? <Button label="Release hold" tone="outline" onPress={() => setDialog('unfreeze')} /> : null}
-      {canCancel ? <Button label="Cancel and refund" tone="danger" onPress={() => setDialog('cancel')} /> : null}
+      {canCancel ? <Button label="Cancel and refund" tone="danger" onPress={openCancel} /> : null}
+      {retryBlocker ? (
+        <Txt variant="small" color="textMuted" style={styles.notice}>
+          {retryBlocker}
+        </Txt>
+      ) : null}
       <NoteDialog
         open={current !== null}
         title={current?.title ?? ''}
         body={current?.body}
-        label="Note for the record"
+        label={current?.label ?? 'Note'}
+        hint={current?.hint}
         placeholder="Why"
         confirmLabel={current?.confirmLabel ?? 'Confirm'}
         confirmTone={current?.tone}
@@ -357,14 +426,25 @@ function BountyActions({ bounty }: { bounty: Bounty }) {
           if (current) void run(() => current.action(note), current.done)
         }}
         onClose={() => setDialog(null)}
-      />
+      >
+        {dialog === 'cancel' ? <Checkbox checked={takeDown} onChange={setTakeDown} label="Take the page down too: afterwards only the poster, its claimants and CIVIC/ONE can open it" /> : null}
+      </NoteDialog>
       <ConfirmDialog
         open={dialog === 'retry'}
         title="Retry the payout?"
-        body={`Sends ${amount} to the claimant’s current bank account now.`}
+        body={`Sends ${amount} to the claimant’s current bank account${account ? ` (${account.bankName} •••• ${account.accountLast4}, “${account.accountName}”)` : ''} now, under the same checks as the first time.`}
         confirmLabel="Retry payout"
         loading={busy}
         onConfirm={() => void run(() => retry({ id }), 'Payout retried.')}
+        onClose={() => setDialog(null)}
+      />
+      <ConfirmDialog
+        open={dialog === 'refund'}
+        title="Send the refund again?"
+        body={`Asks the provider again to return ${latestRefund ? formatZar(latestRefund.amountCents) : amount} to the card that paid.`}
+        confirmLabel="Retry refund"
+        loading={busy}
+        onConfirm={() => void run(() => refund({ id }), 'Refund sent again.')}
         onClose={() => setDialog(null)}
       />
     </View>
@@ -377,5 +457,6 @@ const styles = StyleSheet.create({
   signal: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
   bountyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 12 },
+  notice: { width: '100%' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
 })

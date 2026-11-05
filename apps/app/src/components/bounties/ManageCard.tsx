@@ -70,6 +70,7 @@ function Standing({ claim, bounty }: { claim: Claim; bounty: Bounty }) {
       return (
         <Txt variant="small" color="textMuted">
           You confirmed this claim. CIVIC/ONE verifies after a waiting period{claim.cooldownUntil ? ` ending ${formatDateTime(claim.cooldownUntil)}` : ''}.
+          {claim.confirmNote ? ` Your note to the reviewer: “${claim.confirmNote}”` : ''}
         </Txt>
       )
     case 'VERIFIED':
@@ -125,6 +126,7 @@ function Answer({ claim, bounty }: { claim: Claim; bounty: Bounty }) {
         title="Confirm this claim?"
         body={`You’re telling CIVIC/ONE that ${who} honoured this bounty. We’ll verify it after a waiting period of ${cooldownDays} days and pay ${amount} to them. You can’t undo this.`}
         label="Note for CIVIC/ONE (optional)"
+        hint="Only the reviewer sees this; the claimant doesn’t."
         placeholder="Anything our reviewer should know"
         required={false}
         confirmLabel="Yes, confirm"

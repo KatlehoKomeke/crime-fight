@@ -720,6 +720,7 @@ export const ClaimFields = graphql(`
     body
     links
     posterNote
+    confirmNote
     disputeNote
     decisionReason
     decisionNote
@@ -766,6 +767,7 @@ export const BountyDetailFields = graphql(`
     sapsCaseNumber
     relationship
     frozenFromStatus
+    removedAt
     poster {
       ...UserRowFields
       viewerCanMessage
@@ -1238,8 +1240,16 @@ export const DeclineBounty = graphql(`
 `)
 
 export const AdminCancelBounty = graphql(`
-  mutation AdminCancelBounty($id: ID!, $note: String!) {
-    adminCancelBounty(id: $id, note: $note) {
+  mutation AdminCancelBounty($id: ID!, $note: String!, $takeDown: Boolean) {
+    adminCancelBounty(id: $id, note: $note, takeDown: $takeDown) {
+      ...BountyStateFields
+    }
+  }
+`)
+
+export const RetryBountyRefund = graphql(`
+  mutation RetryBountyRefund($id: ID!) {
+    retryBountyRefund(id: $id) {
       ...BountyStateFields
     }
   }
@@ -1269,6 +1279,7 @@ export const SweepBounties = graphql(`
       expiring
       escalated
       redriven
+      scrubbed
     }
   }
 `)

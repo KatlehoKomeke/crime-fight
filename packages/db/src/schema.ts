@@ -256,6 +256,10 @@ export const bounties = pgTable(
     expiresAt: ts(),
     expiringNotifiedAt: ts(),
     closedAt: ts(),
+    /** When it first went on the board; null for one that never did. A closed bounty stays readable by the public only if it was listed. */
+    listedAt: ts(),
+    /** Taken down by an admin, or hidden once the poster deleted their account: only the poster, admins and claimants can open it. */
+    removedAt: ts(),
     winningClaimId: uuid(),
     createdAt: createdAt(),
   },
@@ -286,8 +290,10 @@ export const bountyClaims = pgTable(
     body: text().notNull(),
     /** Up to three https links, one per line, shown as text. */
     links: text().notNull().default(''),
-    /** The poster's reason for rejecting, or note when confirming. */
+    /** The poster's reason for rejecting, which the claimant sees. */
     posterNote: text(),
+    /** What the poster told the reviewer when confirming. Poster and admins only; the claimant never sees it. */
+    confirmNote: text(),
     /** The claimant's dispute of a rejection. */
     disputeNote: text(),
     decisionReason: text({ enum: CLAIM_DECISION_REASONS }),
@@ -400,7 +406,8 @@ export const payoutAccounts = pgTable(
   (t) => [
     check('payout_accounts_status_valid', oneOf(t.status, PAYOUT_ACCOUNT_STATUSES)),
     uniqueIndex('payout_accounts_one_active_idx').on(t.userId).where(sql`${t.status} = 'ACTIVE'`),
-    uniqueIndex('payout_accounts_fingerprint_idx').on(t.fingerprint).where(sql`${t.status} = 'ACTIVE'`),
+    // Replaced accounts keep their row, so a bank account stays tied to the person who first linked it.
+    uniqueIndex('payout_accounts_fingerprint_idx').on(t.fingerprint),
   ],
 )
 

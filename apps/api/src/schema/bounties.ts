@@ -45,6 +45,7 @@ import {
   requestCancellation,
   retryCheckout,
   retryPayout,
+  retryRefund,
   setPayoutAccount,
   settleDeposit,
   submitClaim,
@@ -114,6 +115,15 @@ BountyRef.implement({
     fundedAt: t.field({ type: 'DateTime', nullable: true, resolve: (bounty) => bounty.fundedAt }),
     expiresAt: t.field({ type: 'DateTime', nullable: true, resolve: (bounty) => bounty.expiresAt }),
     closedAt: t.field({ type: 'DateTime', nullable: true, resolve: (bounty) => bounty.closedAt }),
+    removedAt: t.field({
+      type: 'DateTime',
+      nullable: true,
+      description: 'Taken down: only the poster, claimants and admins can open it. Poster and admins only.',
+      resolve: async (bounty, _, ctx) => {
+        const { isAdmin, isPoster } = await access(bounty, ctx)
+        return isAdmin || isPoster ? bounty.removedAt : null
+      },
+    }),
     isExpired: t.boolean({
       description: 'Open but past its date; the hourly sweep closes and refunds it.',
       resolve: (bounty) => bounty.status === 'OPEN' && bounty.expiresAt !== null && bounty.expiresAt < new Date(),
@@ -143,10 +153,10 @@ BountyRef.implement({
     viewerClaim: t.field({ type: BountyClaimRef, nullable: true, resolve: async (bounty, _, ctx) => (await access(bounty, ctx)).claim }),
     claims: t.field({
       type: [BountyClaimRef],
-      description: 'Every claim, oldest first. Poster and admins only; others get an empty list.',
+      description: 'Every claim, oldest first. Poster and admins only; others get an empty list. Withdrawn claims are for admins only.',
       resolve: async (bounty, _, ctx) => {
         const { isAdmin, isPoster } = await access(bounty, ctx)
-        return isAdmin || isPoster ? claimsFor(ctx.db, bounty.id) : []
+        return isAdmin ? claimsFor(ctx.db, bounty.id, true) : isPoster ? claimsFor(ctx.db, bounty.id) : []
       },
     }),
     winningClaim: t.field({
@@ -157,23 +167,22 @@ BountyRef.implement({
         if (!bounty.winningClaimId) return null
         const { isAdmin, isPoster } = await access(bounty, ctx)
         if (!isAdmin && !isPoster) return null
-        const [claim] = await claimsFor(ctx.db, bounty.id)
-        return claim && claim.id === bounty.winningClaimId ? claim : ((await claimsFor(ctx.db, bounty.id)).find((row) => row.id === bounty.winningClaimId) ?? null)
+        return (await claimsFor(ctx.db, bounty.id, true)).find((row) => row.id === bounty.winningClaimId) ?? null
       },
     }),
     events: t.field({
       type: [BountyEventRef],
-      description: 'The activity trail, oldest first: the public part for everyone, all of it for the poster and admins.',
+      description: 'The activity trail, oldest first: the public part for everyone, plus what was addressed to or done by the viewer; all of it for admins.',
       resolve: async (bounty, _, ctx) => {
-        const { isAdmin, isPoster, claim } = await access(bounty, ctx)
-        const all = isAdmin || isPoster
-        const every = await eventsFor(ctx.db, bounty.id, all)
-        // One happening is written once per person it notifies (PAID tells the claimant and the poster); the trail shows it once.
+        const { viewer, isAdmin, isPoster, claim } = await access(bounty, ctx)
+        const every = await eventsFor(ctx.db, bounty.id, { all: isAdmin, id: viewer?.id ?? null })
+        // One happening is written once per person it tells (PAID tells the claimant and the poster); the trail shows it once.
         const rows = every.filter((event, index) => !every.slice(0, index).some((earlier) => earlier.kind === event.kind && earlier.claimId === event.claimId && Math.abs(earlier.createdAt.getTime() - event.createdAt.getTime()) < 1000))
         // Who claimed is between the claimant, the poster and CIVIC/ONE: the public trail says a claim came in, not from whom.
         return rows.map((event) => {
-          const party = all || (claim !== null && event.claimId === claim.id)
-          return { ...event, actorId: party || !event.claimId ? event.actorId : null, viewerMaySeeNote: party }
+          const party = isAdmin || isPoster || (claim !== null && event.claimId === claim.id)
+          const addressed = viewer !== null && (event.recipientId === viewer.id || event.actorId === viewer.id)
+          return { ...event, actorId: party || !event.claimId ? event.actorId : null, viewerMaySeeNote: party || addressed }
         })
       },
     }),
@@ -205,7 +214,18 @@ BountyClaimRef.implement({
     status: t.field({ type: ClaimStatus, resolve: (claim) => claim.status }),
     body: t.exposeString('body'),
     links: t.stringList({ resolve: (claim) => claim.links.split('\n').filter(Boolean) }),
-    posterNote: t.exposeString('posterNote', { nullable: true }),
+    posterNote: t.exposeString('posterNote', { nullable: true, description: 'The poster’s reason for declining, which the claimant sees.' }),
+    confirmNote: t.string({
+      nullable: true,
+      description: 'What the poster told the reviewer when confirming. Poster and admins only.',
+      resolve: async (claim, _, ctx) => {
+        if (!claim.confirmNote) return null
+        if (await ctx.isAdmin()) return claim.confirmNote
+        const viewer = await ctx.viewer()
+        const bounty = viewer ? await ctx.loaders.bounty.load(claim.bountyId) : null
+        return bounty && bounty.posterId === viewer!.id ? claim.confirmNote : null
+      },
+    }),
     disputeNote: t.exposeString('disputeNote', { nullable: true }),
     decisionReason: t.field({ type: ClaimDecisionReason, nullable: true, resolve: (claim) => claim.decisionReason }),
     decisionNote: t.exposeString('decisionNote', { nullable: true }),
@@ -330,6 +350,7 @@ SweepReportRef.implement({
     expiring: t.exposeInt('expiring'),
     escalated: t.exposeInt('escalated'),
     redriven: t.exposeInt('redriven'),
+    scrubbed: t.exposeInt('scrubbed', { description: 'Texts removed under the privacy policy’s retention periods.' }),
   }),
 })
 
@@ -544,8 +565,15 @@ builder.mutationFields((t) => ({
   }),
   retryBountyPayout: t.field({
     type: BountyRef,
+    description: 'Sends a failed payout again, to the claimant’s current account, under the same checks as the first time. Admins only.',
     args: { id: t.arg.id({ required: true }) },
     resolve: async (_root, { id }, ctx) => retryPayout(money(ctx), await ctx.requireAdmin(), String(id)),
+  }),
+  retryBountyRefund: t.field({
+    type: BountyRef,
+    description: 'Sends a refund the provider failed again, to the same card. Admins only.',
+    args: { id: t.arg.id({ required: true }) },
+    resolve: async (_root, { id }, ctx) => retryRefund(money(ctx), await ctx.requireAdmin(), String(id)),
   }),
   approveBounty: t.field({
     type: BountyRef,
@@ -559,8 +587,9 @@ builder.mutationFields((t) => ({
   }),
   adminCancelBounty: t.field({
     type: BountyRef,
-    args: { id: t.arg.id({ required: true }), note: t.arg.string({ required: true }) },
-    resolve: async (_root, args, ctx) => adminCancelBounty(money(ctx), await ctx.requireAdmin(), String(args.id), args.note),
+    description: 'Closes and refunds a bounty from the review side. With `takeDown`, its page stays off everyone’s screen but the poster’s, claimants’ and admins’.',
+    args: { id: t.arg.id({ required: true }), note: t.arg.string({ required: true }), takeDown: t.arg.boolean() },
+    resolve: async (_root, args, ctx) => adminCancelBounty(money(ctx), await ctx.requireAdmin(), String(args.id), args.note, args.takeDown ?? false),
   }),
   freezeBounty: t.field({
     type: BountyRef,

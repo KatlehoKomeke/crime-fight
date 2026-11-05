@@ -48,10 +48,12 @@ export async function deleteAccount(db: Database, viewer: User): Promise<void> {
     const memberOf = tx.select({ id: conversationMembers.conversationId }).from(conversationMembers).where(eq(conversationMembers.userId, viewer.id))
     await tx.delete(conversations).where(inArray(conversations.id, memberOf))
 
-    // Bounties never paid for are abandoned; claims nobody answered are withdrawn; the bank account is freed for its owner.
+    // Bounties never paid for are abandoned; the closed ones come off everyone's screen but CIVIC/ONE's and their claimants'
+    // (the money records stay); claims nobody answered are withdrawn; the bank account row is kept, tied to nobody.
     const drafts = tx.select({ id: bounties.id }).from(bounties).where(and(eq(bounties.posterId, viewer.id), eq(bounties.status, 'PENDING_PAYMENT')))
     await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Account deleted' }).where(and(inArray(ledgerEntries.bountyId, drafts), eq(ledgerEntries.status, 'PENDING')))
     await tx.update(bounties).set({ status: 'ABANDONED', closedAt: new Date() }).where(and(eq(bounties.posterId, viewer.id), eq(bounties.status, 'PENDING_PAYMENT')))
+    await tx.update(bounties).set({ removedAt: new Date() }).where(and(eq(bounties.posterId, viewer.id), isNull(bounties.removedAt)))
     await tx.update(bountyClaims).set({ status: 'WITHDRAWN' }).where(and(eq(bountyClaims.claimantId, viewer.id), inArray(bountyClaims.status, ['SUBMITTED', 'REJECTED_BY_POSTER'])))
     await tx.update(payoutAccounts).set({ status: 'REPLACED', replacedAt: new Date() }).where(and(eq(payoutAccounts.userId, viewer.id), eq(payoutAccounts.status, 'ACTIVE')))
 

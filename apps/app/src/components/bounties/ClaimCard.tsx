@@ -10,7 +10,6 @@ import { profilePath } from '@/lib/profile'
 import { radius, useColors } from '@/theme'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { Icon } from '../Icon'
-import { RichText } from '../RichText'
 import { useToast } from '../Toast'
 import { Avatar, Button, Field, Input, Txt, VerifiedBadge } from '../ui'
 
@@ -133,14 +132,26 @@ export function ClaimantRow({ claimant, meta }: { claimant: ClaimFieldsFragment[
   )
 }
 
-/** A claim's text and its links. Links are shown as plain text: nobody should tap through to a stranger's page from here. */
+/**
+ * A claim's text and its links, all as plain text: a claim reaches someone who
+ * is known to hold money, so nothing in it is a tap away from a stranger's page.
+ */
 export function ClaimText({ claim, collapsible }: { claim: Pick<ClaimFieldsFragment, 'body' | 'links'>; collapsible?: boolean }) {
   const c = useColors()
   const [expanded, setExpanded] = useState(false)
   const long = Boolean(collapsible) && (claim.body.length > 280 || claim.body.split('\n').length > 4)
+  if (!claim.body) {
+    return (
+      <Txt variant="small" color="textMuted">
+        The text of this claim was removed, as the privacy policy says it is a year after the bounty closes.
+      </Txt>
+    )
+  }
   return (
     <View style={{ gap: 6 }}>
-      <RichText body={claim.body} numberOfLines={long && !expanded ? 4 : undefined} />
+      <Txt numberOfLines={long && !expanded ? 4 : undefined} selectable>
+        {claim.body}
+      </Txt>
       {long ? (
         <Pressable onPress={() => setExpanded((value) => !value)} accessibilityRole="button" accessibilityState={{ expanded }} style={{ alignSelf: 'flex-start' }}>
           <Txt variant="smallStrong" style={{ color: c.accentText }}>
@@ -293,7 +304,7 @@ function WithdrawAction({ claimId }: { claimId: string }) {
       <ConfirmDialog
         open={open}
         title="Withdraw your claim?"
-        body="The poster won’t see it any more. You can send a new claim while the bounty is open."
+        body="The poster won’t see it any more. A bounty can be claimed once, so you can’t send another claim on this one."
         confirmLabel="Withdraw"
         confirmTone="danger"
         loading={fetching}

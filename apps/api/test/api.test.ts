@@ -6,7 +6,7 @@ import { ExecuteStatementCommand } from '@aws-sdk/client-rds-data'
 import { createDataApiClient, createDb, type DbConfig, type DbHandle, schema } from '@civic/db'
 import { runMigrations } from '@civic/db/migrate'
 import { seed } from '@civic/db/seed'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAuthenticator, type Identity } from '../src/auth'
@@ -17,9 +17,10 @@ import { serveOg } from '../src/og/serve'
 import { attachLocalRealtime } from '../src/realtime/local-server'
 import { memoryHub } from '../src/realtime/publisher'
 import type { SignIns } from '../src/sign-ins'
-import { handleProviderEvent } from '../src/data/bounties'
+import { applyTransfer, cancelBounty, decideClaim, handleProviderEvent, heldForUser, pageAdminQueue, retryRefund, sweep } from '../src/data/bounties'
 import { paystackProvider } from '../src/payments/paystack'
 import { sandboxProvider } from '../src/payments/sandbox'
+import type { PaymentProvider } from '../src/payments/types'
 import { createApi } from '../src/yoga'
 
 const TEST_URL = process.env.TEST_DATABASE_URL ?? 'postgres://civic:civic@localhost:54329/civic_test'
@@ -943,7 +944,11 @@ describe('bounties', () => {
     const set = await gql(SET, { input: { bankCode: '250655', accountNumber: '62 123 456 789', accountName: 'Thandi Mokoena' } }, 'thandi_m')
     expect(set.data.setPayoutAccount).toMatchObject({ bankName: 'FNB', accountLast4: '6789' })
     expect(Date.parse(set.data.setPayoutAccount.readyAt) - Date.now()).toBeGreaterThan(71 * 60 * 60_000)
-    expect((await gql(SET, { input: { bankCode: '250655', accountNumber: '62123456789', accountName: 'A Morgan' } }, 'alexm')).errors?.[0]?.message).toMatch(/already linked/)
+    expect((await gql(SET, { input: { bankCode: '250655', accountNumber: '62123456789', accountName: 'A Morgan' } }, 'alexm')).errors?.[0]?.message).toMatch(/can’t be linked/)
+    // Replaced or not, the account stays Thandi's: Alex can't have it once she moves to another, but she can come back to it.
+    await gql(SET, { input: { bankCode: '470010', accountNumber: '1555550000', accountName: 'Thandi Mokoena' } }, 'thandi_m')
+    expect((await gql(SET, { input: { bankCode: '250655', accountNumber: '62123456789', accountName: 'A Morgan' } }, 'alexm')).errors?.[0]?.message).toMatch(/can’t be linked/)
+    expect((await gql(SET, { input: { bankCode: '250655', accountNumber: '62123456789', accountName: 'Thandi Mokoena' } }, 'thandi_m')).data.setPayoutAccount.accountLast4).toBe('6789')
     expect(code(await gql(SET, { input: { bankCode: '000000', accountNumber: '123456', accountName: 'X' } }, 'alexm'))).toBe('BAD_USER_INPUT')
 
     // Thandi claims a bounty and is confirmed, but her account is too new to be paid.
@@ -976,5 +981,274 @@ describe('bounties', () => {
     expect(user?.handle).toMatch(/^civicone\d{4}$/)
     expect((await gql(`{ viewer { viewerIsAdmin } }`, {}, 'civicone')).data.viewer.viewerIsAdmin).toBe(true)
     expect((await gql(`{ viewer { viewerIsAdmin } }`, {}, 'alexm')).data.viewer.viewerIsAdmin).toBe(false)
+  })
+
+  /* What the review of the money layer found (see docs/adr/0006-bounties.md, "What the review changed"). */
+
+  const user = async (h: string) => (await handle.db.select().from(schema.users).where(eq(schema.users.handle, h)))[0]!
+  const row = async (id: string) => (await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, id)))[0]!
+  const ledgerOf = async (id: string) => (await handle.db.select().from(schema.ledgerEntries).where(eq(schema.ledgerEntries.bountyId, id))).sort((a, b) => a.reference.localeCompare(b.reference)).map((e) => `${e.type}/${e.status}/${e.amountCents}`)
+  const money = async (id: string) => {
+    const b = await row(id)
+    return `${b.status} ${b.depositedCents}/${b.releasedCents}/${b.refundedCents}`
+  }
+  /** The sandbox with some answers replaced, for the paths it can't produce on its own. */
+  const withProvider = (overrides: Partial<PaymentProvider>) => ({ db: handle.db, payments: { ...payments, provider: { ...payments.provider, ...overrides } as PaymentProvider } })
+  const charge = (reference: string, key: string) => ({ type: 'CHARGE_SUCCESS' as const, eventKey: key, eventType: 'charge.success', reference })
+  // The database handle exists once the suite has started.
+  const ctx = {
+    get db() {
+      return handle.db
+    },
+    payments,
+  }
+
+  it('takes in a payment that lands after its checkout was written off, and returns one that lands twice', async () => {
+    // Deleted unpaid, then the still-open checkout page is paid: the money comes in and goes straight back.
+    const alex = await user('alexm')
+    const { data } = await gql(CREATE, { input: property }, 'alexm')
+    const deleted = data.createBounty.bounty.id as string
+    await gql(`mutation($id: ID!) { cancelBounty(id: $id) { status } }`, { id: deleted }, 'alexm')
+    payments.provider.complete(`dep-${deleted}-1`, 'SUCCESS')
+    expect(await handleProviderEvent(ctx, charge(`dep-${deleted}-1`, 'late-1'), '{}')).toBe('APPLIED')
+    expect(await money(deleted)).toBe('ABANDONED 100000/0/100000')
+    expect(await ledgerOf(deleted)).toEqual(['DEPOSIT/SETTLED/100000', 'REFUND/SETTLED/100000'])
+
+    // "Pay again" opened a second checkout; both pages are paid. The first funds the bounty, the second is returned.
+    const twice = (await gql(CREATE, { input: { ...property, title: `${property.title} again` } }, 'alexm')).data.createBounty.bounty.id as string
+    const retried = await gql(`mutation($id: ID!) { retryBountyCheckout(id: $id) { checkoutUrl bounty { status } } }`, { id: twice }, 'alexm')
+    expect(retried.data.retryBountyCheckout.checkoutUrl).toContain(`dep-${twice}-2`)
+    payments.provider.complete(`dep-${twice}-1`, 'SUCCESS')
+    payments.provider.complete(`dep-${twice}-2`, 'SUCCESS')
+    expect(await handleProviderEvent(ctx, charge(`dep-${twice}-1`, 'twice-1'), '{}')).toBe('APPLIED')
+    expect(await money(twice)).toBe('OPEN 100000/0/0')
+    expect(await handleProviderEvent(ctx, charge(`dep-${twice}-2`, 'twice-2'), '{}')).toBe('APPLIED')
+    expect(await money(twice)).toBe('OPEN 200000/0/100000')
+    expect(await ledgerOf(twice)).toEqual(['DEPOSIT/SETTLED/100000', 'DEPOSIT/FAILED/100000', 'REFUND/SETTLED/100000'])
+    expect(titles(await gql(BOARD))).toContain('Red Honda Fit')
+    // Everything it holds is still exactly one reward: cancelling refunds that and no more.
+    await cancelBounty(ctx, alex, twice)
+    expect(await money(twice)).toBe('CANCELLED 200000/0/200000')
+  })
+
+  it('reads Paystack’s answers as Paystack means them: abandoned is still payable, refunds and disputes name our reference', async () => {
+    const provider = paystackProvider('sk_test_secret')
+    const realFetch = globalThis.fetch
+    const answer = (status: number, body: unknown) => {
+      globalThis.fetch = (async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })) as typeof fetch
+    }
+    try {
+      const transaction = (status: string) => ({ status: true, message: 'Verification successful', data: { id: 4099260516, status, reference: 'dep-x-1', amount: 100000, currency: 'ZAR', fees: 2900 } })
+      answer(200, transaction('abandoned'))
+      expect((await provider.verifyCheckout('dep-x-1'))?.status).toBe('PENDING')
+      answer(200, transaction('failed'))
+      expect((await provider.verifyCheckout('dep-x-1'))?.status).toBe('FAILED')
+      answer(404, { status: false, message: 'Transaction reference not found' })
+      expect(await provider.verifyCheckout('dep-x-1')).toBeNull()
+      answer(400, { status: false, message: 'Transaction reference not found' })
+      expect(await provider.verifyCheckout('dep-x-1')).toBeNull()
+    } finally {
+      globalThis.fetch = realFetch
+    }
+    const signed = (payload: unknown) => {
+      const body = Buffer.from(JSON.stringify(payload))
+      return provider.parseWebhook(body, createHmac('sha512', 'sk_test_secret').update(body).digest('hex'))!
+    }
+    expect(signed({ event: 'refund.processed', data: { status: 'processed', transaction_reference: 'dep-x-1', refund_reference: null, amount: '100000', currency: 'ZAR' } })).toMatchObject({ type: 'REFUND', transactionRef: 'dep-x-1', status: 'SETTLED' })
+    expect(signed({ event: 'charge.dispute.resolve', data: { id: 358950, status: 'resolved', resolution: 'merchant-accepted', transaction: { id: 4099260516, reference: 'dep-x-1' } } })).toMatchObject({ type: 'CHARGEBACK', transactionRef: 'dep-x-1', status: 'RESOLVED', resolution: 'merchant-accepted' })
+
+    // A refund Paystack accepts as "pending" settles when its event arrives, carrying our transaction reference.
+    const jordan = await user('jordan_o')
+    const corolla = await seeded('Silver 2016')
+    await handle.db.update(schema.ledgerEntries).set({ providerRef: '4099260516' }).where(and(eq(schema.ledgerEntries.bountyId, corolla.id), eq(schema.ledgerEntries.type, 'DEPOSIT')))
+    const slow = withProvider({ refund: () => Promise.resolve({ status: 'PENDING', providerRef: '3018284' }) })
+    await cancelBounty(slow, jordan, corolla.id)
+    expect(await money(corolla.id)).toBe('CANCELLED 500000/0/0')
+    expect(await handleProviderEvent(slow, { type: 'REFUND', eventKey: 'refund-1', eventType: 'refund.processed', transactionRef: `dep-${corolla.id}-1`, status: 'SETTLED', providerRef: null }, '{}')).toBe('APPLIED')
+    expect(await money(corolla.id)).toBe('CANCELLED 500000/0/500000')
+
+    // A dispute freezes the bounty and tells the poster; lost, it closes the bounty with the money already gone back.
+    const harbor = await seeded('Information on the Harbor')
+    expect(await handleProviderEvent(ctx, { type: 'CHARGEBACK', eventKey: 'dispute-1', eventType: 'charge.dispute.create', transactionRef: `dep-${harbor.id}-1`, status: 'CREATED', resolution: null }, '{}')).toBe('APPLIED')
+    expect((await row(harbor.id)).status).toBe('FROZEN')
+    expect(await ledgerOf(harbor.id)).toEqual(['CHARGEBACK/SETTLED/200000', 'DEPOSIT/SETTLED/200000'])
+    const poster = await gql(`{ notifications(first: 5) { edges { node { bountyEvent note } } } }`, {}, 'harbor_watch')
+    expect(poster.data.notifications.edges.map((e: { node: { bountyEvent: string } }) => e.node.bountyEvent)).toContain('FROZEN')
+    expect(await handleProviderEvent(ctx, { type: 'CHARGEBACK', eventKey: 'dispute-2', eventType: 'charge.dispute.resolve', transactionRef: `dep-${harbor.id}-1`, status: 'RESOLVED', resolution: 'merchant-accepted' }, '{}')).toBe('APPLIED')
+    expect(await money(harbor.id)).toBe('CANCELLED 200000/0/200000')
+    expect((await handle.db.select().from(schema.bountyClaims).where(eq(schema.bountyClaims.bountyId, harbor.id)))[0]?.status).toBe('REJECTED')
+
+    // Any other outcome is left to an admin, who releases the hold once the dashboard shows the money back.
+    const bike = await funded('alexm')
+    await handleProviderEvent(ctx, { type: 'CHARGEBACK', eventKey: 'dispute-3', eventType: 'charge.dispute.create', transactionRef: `dep-${bike}-1`, status: 'CREATED', resolution: null }, '{}')
+    await handleProviderEvent(ctx, { type: 'CHARGEBACK', eventKey: 'dispute-4', eventType: 'charge.dispute.resolve', transactionRef: `dep-${bike}-1`, status: 'RESOLVED', resolution: 'declined' }, '{}')
+    expect(await money(bike)).toBe('FROZEN 100000/0/0')
+    const released = await gql(`mutation($id: ID!, $note: String!) { unfreezeBounty(id: $id, note: $note) { status } }`, { id: bike, note: 'The bank found for us; the balance shows the money back.' }, 'civicone')
+    expect(released.data.unfreezeBounty.status).toBe('OPEN')
+    expect((await ledgerOf(bike)).sort()).toEqual(['CHARGEBACK/SETTLED/100000', 'CHARGEBACK_REVERSED/SETTLED/100000', 'DEPOSIT/SETTLED/100000'])
+  })
+
+  it('treats a transfer reversed before it settled as a failed payout, and retries a webhook that failed to apply', async () => {
+    const alex = await user('alexm')
+    const admin = await user('civicone')
+    const thandi = await user('thandi_m')
+    await handle.db.insert(schema.payoutAccounts).values({ userId: thandi.id, provider: 'sandbox', recipientCode: 'RCP_sandbox_250655_1234', bankCode: '250655', bankName: 'FNB', accountName: 'Thandi Mokoena', accountLast4: '1234', fingerprint: 'test-thandi-1234', createdAt: new Date(Date.now() - 100 * 3600_000) })
+    const id = await funded('alexm')
+    const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await gql(CONFIRM, { id: claim.id }, 'alexm')
+    await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claim.id))
+    // Paystack queues the transfer, then sends it back before it ever settled.
+    const queued = withProvider({ transfer: () => Promise.resolve({ status: 'PENDING', providerRef: 'TRF_1' }), fetchTransfer: () => Promise.resolve(null) })
+    await decideClaim(queued, admin, claim.id, 'VERIFY', 'VERIFIED', 'Checked with the station.')
+    await applyTransfer(queued, `rel-${claim.id}-1`, 'REVERSED', 'TRF_1')
+    expect(await ledgerOf(id)).toEqual(['DEPOSIT/SETTLED/100000', 'RELEASE/FAILED/100000'])
+    expect((await gql(`query($id: ID!) { bounty(id: $id) { status latestPayout { status } } }`, { id }, 'civicone')).data.bounty).toMatchObject({ status: 'RELEASING', latestPayout: { status: 'FAILED' } })
+    // A refusal the provider gives at once (no balance) is the same failed payout; a retry sends a new attempt.
+    const broke = withProvider({ transfer: () => Promise.reject(Object.assign(new Error('Paystack POST /transfer: 400 Your balance is not enough'), { name: 'PaymentProviderError', status: 400 })) })
+    expect((await gql(`mutation($id: ID!) { retryBountyPayout(id: $id) { status } }`, { id }, 'harbor_watch')).errors?.[0]?.extensions.code).toBe('FORBIDDEN')
+    const again = await gql(`mutation($id: ID!) { retryBountyPayout(id: $id) { status } }`, { id }, 'civicone')
+    expect(again.data.retryBountyPayout.status).toBe('PAID')
+    expect(broke.payments.provider.name).toBe('sandbox')
+    expect(alex.id).toBeTruthy()
+
+    // The provider times out while a charge.success is being verified; the redelivery applies it.
+    const fresh = (await gql(CREATE, { input: { ...property, title: `${property.title} webhook` } }, 'alexm')).data.createBounty.bounty.id as string
+    payments.provider.complete(`dep-${fresh}-1`, 'SUCCESS')
+    let calls = 0
+    const flaky = withProvider({ verifyCheckout: (reference) => (calls++ === 0 ? Promise.reject(new Error('timeout')) : payments.provider.verifyCheckout(reference)) })
+    await expect(handleProviderEvent(flaky, charge(`dep-${fresh}-1`, 'flaky-1'), '{}')).rejects.toThrow('timeout')
+    expect(await handleProviderEvent(flaky, charge(`dep-${fresh}-1`, 'flaky-1'), '{}')).toBe('APPLIED')
+    expect(await handleProviderEvent(flaky, charge(`dep-${fresh}-1`, 'flaky-1'), '{}')).toBe('DUPLICATE')
+    expect(await money(fresh)).toBe('OPEN 100000/0/0')
+  })
+
+  it('reopens a bounty whose confirmed claim is rejected after its date while other claims wait, and refunds when none do', async () => {
+    const admin = await user('civicone')
+    const harbor = await seeded('Information on the Harbor')
+    const first = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].id as string
+    const second = (await gql(CLAIM, { bountyId: harbor.id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await gql(CONFIRM, { id: first }, 'harbor_watch')
+    await handle.db.update(schema.bounties).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(schema.bounties.id, harbor.id))
+    await decideClaim(ctx, admin, first, 'REJECT', 'NOT_ENOUGH_EVIDENCE', 'The station has no record of this statement.')
+    // Thandi's claim is still being answered, so the bounty reopens instead of expiring over her head.
+    expect(await money(harbor.id)).toBe('OPEN 200000/0/0')
+    expect((await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims.map((c: { id: string; status: string }) => c.status).sort()).toEqual(['REJECTED', 'SUBMITTED'])
+    // The poster hears the decision with its public reason, not the admin's note to the claimant.
+    const posterView = await gql(`{ notifications(first: 5) { edges { node { bountyEvent note } } } }`, {}, 'harbor_watch')
+    const rejection = posterView.data.notifications.edges.map((e: { node: { bountyEvent: string; note: string | null } }) => e.node).find((n: { bountyEvent: string }) => n.bountyEvent === 'CLAIM_REJECTED')
+    expect(rejection.note).toMatch(/Not enough evidence/)
+    expect(rejection.note).not.toMatch(/station has no record/)
+    // Once her claim is withdrawn nothing holds it: the sweep expires and refunds it.
+    await gql(`mutation($id: ID!) { withdrawClaim(id: $id) { status } }`, { id: second.id }, 'thandi_m')
+    expect((await sweep(ctx)).expired).toBe(1)
+    expect(await money(harbor.id)).toBe('EXPIRED 200000/0/200000')
+  })
+
+  it('keeps a failed refund in front of an admin and the poster until it is sent again', async () => {
+    const jordan = await user('jordan_o')
+    const admin = await user('civicone')
+    const corolla = await seeded('Silver 2016')
+    await cancelBounty(withProvider({ refund: () => Promise.resolve({ status: 'FAILED', providerRef: '99' }) }), jordan, corolla.id)
+    expect(await money(corolla.id)).toBe('CANCELLED 500000/0/0')
+    expect(await ledgerOf(corolla.id)).toEqual(['DEPOSIT/SETTLED/500000', 'REFUND/FAILED/500000'])
+    expect((await pageAdminQueue(handle.db, { first: 50 })).edges.map((e) => e.node.id)).toContain(corolla.id)
+    expect(await heldForUser(handle.db, jordan.id)).toContain(corolla.id)
+    const told = await gql(`{ notifications(first: 5) { edges { node { bountyEvent } } } }`, {}, 'jordan_o')
+    expect(told.data.notifications.edges.map((e: { node: { bountyEvent: string } }) => e.node.bountyEvent)).toContain('REFUND_FAILED')
+    await retryRefund(ctx, admin, corolla.id)
+    expect(await money(corolla.id)).toBe('CANCELLED 500000/0/500000')
+    expect((await pageAdminQueue(handle.db, { first: 50 })).edges.map((e) => e.node.id)).not.toContain(corolla.id)
+    expect(await heldForUser(handle.db, jordan.id)).toEqual([])
+  })
+
+  it('holds a retried payout to the new-account rule and counts unpaid bounties against the cap', async () => {
+    const admin = await user('civicone')
+    const thandi = await user('thandi_m')
+    const SET = `mutation($input: PayoutAccountInput!) { setPayoutAccount(input: $input) { id } }`
+    await gql(SET, { input: { bankCode: '250655', accountNumber: '62000000000', accountName: 'Thandi Mokoena' } }, 'thandi_m')
+    await handle.db.update(schema.payoutAccounts).set({ createdAt: new Date(Date.now() - 100 * 3600_000) }).where(eq(schema.payoutAccounts.userId, thandi.id))
+    const id = await funded('alexm')
+    const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await gql(CONFIRM, { id: claim.id }, 'alexm')
+    await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claim.id))
+    // The account ending 0000 bounces; she then swaps in a brand-new one.
+    await decideClaim(ctx, admin, claim.id, 'VERIFY', 'VERIFIED', 'ok')
+    expect(await ledgerOf(id)).toEqual(['DEPOSIT/SETTLED/100000', 'RELEASE/FAILED/100000'])
+    await gql(SET, { input: { bankCode: '470010', accountNumber: '1555551234', accountName: 'Some Mule' } }, 'thandi_m')
+    const RETRY = `mutation($id: ID!) { retryBountyPayout(id: $id) { status } }`
+    expect((await gql(RETRY, { id }, 'civicone')).errors?.[0]?.message).toMatch(/on hold until/)
+    await handle.db.update(schema.payoutAccounts).set({ createdAt: new Date(Date.now() - 100 * 3600_000) }).where(and(eq(schema.payoutAccounts.userId, thandi.id), eq(schema.payoutAccounts.status, 'ACTIVE')))
+    expect((await gql(RETRY, { id }, 'civicone')).data.retryBountyPayout.status).toBe('PAID')
+    const [paid] = await handle.db.select().from(schema.bountyClaims).where(eq(schema.bountyClaims.id, claim.id))
+    expect(JSON.parse(paid!.preflight!)).toMatchObject({ payoutNameMismatch: true })
+
+    // Three R50 000 bounties created before any is paid would hold R150 000; the third is refused at creation.
+    for (let i = 0; i < 2; i++) expect((await gql(CREATE, { input: { ...property, title: `${property.title} ${i}`, amountCents: 5_000_000 } }, 'civicone')).errors).toBeUndefined()
+    expect((await gql(CREATE, { input: { ...property, title: `${property.title} 3`, amountCents: 5_000_000 } }, 'civicone')).errors?.[0]?.message).toMatch(/holds at most/)
+  })
+
+  it('keeps reports, confirmation notes and withdrawn claims from the poster, and unlisted or taken-down bounties from the public', async () => {
+    const corolla = await seeded('Silver 2016')
+    await gql(`mutation($id: ID!) { reportBounty(id: $id, reason: SCAM, note: "the plate is my neighbour’s") { id } }`, { id: corolla.id }, 'thandi_m')
+    const EVENTS = `query($id: ID!) { bounty(id: $id) { events { kind note actor { handle } } } }`
+    const kinds = (result: { data: { bounty: { events: Array<{ kind: string; actor: { handle: string } | null }> } } }) => result.data.bounty.events.map((e) => e.kind)
+    expect(kinds(await gql(EVENTS, { id: corolla.id }, 'jordan_o'))).not.toContain('REPORTED')
+    const asAdmin = await gql(EVENTS, { id: corolla.id }, 'civicone')
+    expect(asAdmin.data.bounty.events.find((e: { kind: string }) => e.kind === 'REPORTED')).toMatchObject({ actor: null, note: 'SCAM' })
+
+    // The poster's note to the reviewer never reaches the claimant; the claimant's withdrawn claim never reaches the poster.
+    const harbor = await seeded('Information on the Harbor')
+    const claimId = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].id as string
+    await gql(CONFIRM, { id: claimId, note: 'He keeps coming to my house; please check him.' }, 'harbor_watch')
+    const NOTES = `query($id: ID!) { bounty(id: $id) { viewerClaim { posterNote confirmNote } claims { confirmNote } } }`
+    expect((await gql(NOTES, { id: harbor.id }, 'jordan_o')).data.bounty.viewerClaim).toEqual({ posterNote: null, confirmNote: null })
+    expect((await gql(NOTES, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].confirmNote).toMatch(/coming to my house/)
+    const bike = await funded('alexm')
+    const claim = (await gql(CLAIM, { bountyId: bike, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await gql(`mutation($id: ID!) { withdrawClaim(id: $id) { status } }`, { id: claim.id }, 'thandi_m')
+    expect((await gql(GET, { id: bike }, 'alexm')).data.bounty.claims).toEqual([])
+    expect((await gql(GET, { id: bike }, 'civicone')).data.bounty.claims).toHaveLength(1)
+    expect((await gql(CLAIM, { bountyId: bike, input: { body: claimBody, attested: true } }, 'thandi_m')).errors?.[0]?.message).toMatch(/claimed once/)
+
+    // Declined in review: never listed, so never public, even now that it's cancelled.
+    const missing = await seeded('Missing:')
+    await gql(`mutation($id: ID!, $note: String!) { declineBounty(id: $id, note: $note) { status } }`, { id: missing.id, note: 'The person has a protection order against the poster.' }, 'civicone')
+    expect((await gql(GET, { id: missing.id })).data.bounty).toBeNull()
+    expect((await gql(GET, { id: missing.id }, 'thandi_m')).data.bounty.status).toBe('CANCELLED')
+    // Listed, then taken down: the same. Listed and cancelled in the ordinary way: the page still explains the link.
+    await gql(`mutation($id: ID!, $note: String!) { adminCancelBounty(id: $id, note: $note, takeDown: true) { status } }`, { id: corolla.id, note: 'Taken down: shares personal information.' }, 'civicone')
+    expect((await gql(GET, { id: corolla.id })).data.bounty).toBeNull()
+    expect((await gql(GET, { id: corolla.id }, 'jordan_o')).data.bounty.status).toBe('CANCELLED')
+    await gql(`mutation($id: ID!) { cancelBounty(id: $id) { status } }`, { id: bike }, 'alexm')
+    expect((await gql(GET, { id: bike })).data.bounty.status).toBe('CANCELLED')
+    // Once the poster deletes their account, their closed bounties leave everyone's screens but CIVIC/ONE's.
+    await gql(`mutation($handle: String!) { deleteAccount(handle: $handle) }`, { handle: 'alexm' }, 'alexm')
+    expect((await gql(GET, { id: bike })).data.bounty).toBeNull()
+    expect((await gql(GET, { id: bike }, 'civicone')).data.bounty.status).toBe('CANCELLED')
+  })
+
+  it('refuses admin actions on an admin’s own bounty, and settings that aren’t a number of hours', async () => {
+    const id = await funded('civicone')
+    const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await gql(CONFIRM, { id: claim.id }, 'civicone')
+    for (const mutation of ['adminCancelBounty', 'freezeBounty']) {
+      expect(code(await gql(`mutation($id: ID!, $note: String!) { ${mutation}(id: $id, note: $note) { status } }`, { id, note: 'x' }, 'civicone'))).toBe('FORBIDDEN')
+    }
+    expect(readEnv({ BOUNTY_CLAIM_MIN_ACCOUNT_AGE_HOURS: '' }).claimMinAccountAgeHours).toBe(72)
+    expect(readEnv({ BOUNTY_CLAIM_MIN_ACCOUNT_AGE_HOURS: '0' }).claimMinAccountAgeHours).toBe(0)
+    expect(() => readEnv({ BOUNTY_CLAIM_MIN_ACCOUNT_AGE_HOURS: '72h' })).toThrow(/whole number of hours/)
+  })
+
+  it('removes a missing person’s details and claim text once the privacy policy says so', async () => {
+    const missing = await seeded('Missing:')
+    await gql(`mutation($id: ID!, $note: String!) { declineBounty(id: $id, note: $note) { status } }`, { id: missing.id, note: 'No case number could be confirmed.' }, 'civicone')
+    await handle.db.update(schema.bounties).set({ closedAt: new Date(Date.now() - 8 * 24 * 3600_000) }).where(eq(schema.bounties.id, missing.id))
+    const bicycle = await seeded('Black Giant')
+    await handle.db.update(schema.bounties).set({ closedAt: new Date(Date.now() - 400 * 24 * 3600_000) }).where(eq(schema.bounties.id, bicycle.id))
+    expect((await sweep(ctx)).scrubbed).toBe(2)
+    expect(await row(missing.id)).toMatchObject({ title: 'Missing person (details removed)', body: '', area: null, relationship: null })
+    expect((await handle.db.select().from(schema.bountyClaims).where(eq(schema.bountyClaims.bountyId, bicycle.id)))[0]).toMatchObject({ body: '', links: '' })
+    // Idempotent: nothing left to remove.
+    expect((await sweep(ctx)).scrubbed).toBe(0)
   })
 })
