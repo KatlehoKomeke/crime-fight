@@ -468,6 +468,12 @@ export async function submitClaim(ctx: MoneyContext, claimant: User, bountyId: s
   if (bounty.posterId === claimant.id) throw badInput('You can’t claim your own bounty.')
   if (bounty.status !== 'OPEN') throw badInput('New claims aren’t being accepted on this bounty right now.')
   if (bounty.expiresAt && bounty.expiresAt < new Date()) throw badInput('This bounty has expired.')
+  // A thief can't open an account to claim their own bounty the same day.
+  const minAge = ctx.payments.claimMinAccountAgeHours
+  if (minAge > 0 && claimant.createdAt > new Date(Date.now() - hours(minAge))) {
+    const wait = minAge >= 48 ? `${Math.round(minAge / 24)} days` : `${minAge} hours`
+    throw badInput(`New accounts can submit claims after ${wait}. In the meantime, give what you know to SAPS on 10111.`)
+  }
   const parsed = submitClaimSchema.safeParse(raw)
   if (!parsed.success) throw badInput(parsed.error.issues[0]?.message ?? 'Invalid claim', issues(parsed.error))
   checkClaimText(bounty.kind, parsed.data.body)

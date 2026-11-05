@@ -314,7 +314,10 @@ function bounty(card: BountyCard, posterPhoto: string | null) {
         box(
           { flexDirection: 'column', gap: 4 },
           text({ fontFamily: SANS, fontWeight: 700, fontSize: 26, color: C.ink }, card.poster ? card.poster.name : 'A former member', card.poster?.verified ? verified(24, { marginLeft: 8 }) : null),
-          text({ fontFamily: SANS, fontWeight: 400, fontSize: 22, color: C.muted }, [card.area, paid ? 'Reward paid out' : BOUNTY_STATUS_LABEL[card.status], 'Held by CIVIC/ONE until verified'].filter(Boolean).join('  ·  ')),
+          text(
+            { fontFamily: SANS, fontWeight: 400, fontSize: 22, color: C.muted },
+            [card.area, paid ? 'Reward paid out' : BOUNTY_STATUS_LABEL[card.status], paid ? 'Verified by CIVIC/ONE' : 'Held by CIVIC/ONE until verified'].filter(Boolean).join('  ·  '),
+          ),
         ),
       ),
     ),

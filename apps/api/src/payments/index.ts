@@ -15,6 +15,8 @@ export interface Payments {
   siteUrl: string
   /** Keys one bank account to one person without storing the account number (see payout_accounts.fingerprint). */
   fingerprintKey: string
+  /** How old an account must be before it can claim a bounty. */
+  claimMinAccountAgeHours: number
 }
 
 /**
@@ -35,9 +37,10 @@ export async function resolvePayments(env: ApiEnv): Promise<Payments> {
     }
   }
   siteUrl ??= 'http://localhost:8081'
+  const claimMinAccountAgeHours = env.claimMinAccountAgeHours
 
   if (env.paymentsProvider === 'sandbox') {
-    return { provider: sandboxProvider({ siteUrl }), siteUrl, fingerprintKey: 'sandbox' }
+    return { provider: sandboxProvider({ siteUrl }), siteUrl, fingerprintKey: 'sandbox', claimMinAccountAgeHours }
   }
   if (env.paymentsProvider === 'paystack') {
     let secretKey = env.paystackSecretKey
@@ -55,9 +58,9 @@ export async function resolvePayments(env: ApiEnv): Promise<Payments> {
     }
     if (!secretKey) throw new Error('No Paystack secret key found')
     // One bank account, one person: the fingerprint key must outlive any key rotation, so it's its own value.
-    return { provider: paystackProvider(secretKey), siteUrl, fingerprintKey: fingerprintKey ?? secretKey }
+    return { provider: paystackProvider(secretKey), siteUrl, fingerprintKey: fingerprintKey ?? secretKey, claimMinAccountAgeHours }
   }
-  return { provider: null, siteUrl, fingerprintKey: 'disabled' }
+  return { provider: null, siteUrl, fingerprintKey: 'disabled', claimMinAccountAgeHours }
 }
 
-export const disabledPayments = (siteUrl = 'http://localhost:8081'): Payments => ({ provider: null, siteUrl, fingerprintKey: 'disabled' })
+export const disabledPayments = (siteUrl = 'http://localhost:8081'): Payments => ({ provider: null, siteUrl, fingerprintKey: 'disabled', claimMinAccountAgeHours: 72 })

@@ -35,6 +35,8 @@ export async function seed(db: Database): Promise<{ users: number; posts: number
         displayName: u.displayName,
         role: u.role,
         bio: u.bio,
+        // Long-standing members: new accounts can't claim bounties for a few days.
+        createdAt: ago(60 * 24 * 120),
         verifiedAt: u.verified ? ago(60 * 24 * 90) : null,
       })),
     )

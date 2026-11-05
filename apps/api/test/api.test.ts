@@ -46,7 +46,7 @@ let queries = 0
 /** Inbox events the API publishes, as AppSync Events would deliver them. */
 const hub = memoryHub()
 /** Pretend money: checkouts complete on request, transfers settle at once, an account ending 0000 bounces. */
-const payments = { provider: sandboxProvider({ siteUrl: 'http://test' }), siteUrl: 'http://test', fingerprintKey: 'test' }
+const payments = { provider: sandboxProvider({ siteUrl: 'http://test' }), siteUrl: 'http://test', fingerprintKey: 'test', claimMinAccountAgeHours: 72 }
 
 interface GqlResult<T> {
   status: number
@@ -759,6 +759,27 @@ describe('bounties', () => {
     expect(titles(await gql(BOARD))).toContain('Red Honda Fit')
   })
 
+  it('refuses claims from accounts younger than the waiting period', async () => {
+    // A thief can't open an account to claim their own bounty the same day. The demo accounts are ten days old.
+    await handle.db.insert(schema.users).values({ handle: 'newbie', displayName: 'New Neighbour', authSub: 'dev:newbie' })
+    const corolla = await seeded('Silver 2016')
+    const input = { body: 'Saw it parked behind the Salt River station on Thursday and told the SAPS officer on duty there at 09:00.', attested: true }
+    const result = await gql(CLAIM, { bountyId: corolla.id, input }, 'newbie')
+    expect(code(result)).toBe('BAD_USER_INPUT')
+    expect(result.errors?.[0]?.message).toMatch(/New accounts can submit claims after 3 days/)
+    await handle.db.delete(schema.users).where(eq(schema.users.handle, 'newbie'))
+  })
+
+  it('tells the public a claim came in, but not from whom', async () => {
+    const harbor = await seeded('Information on the Harbor')
+    const EVENTS = `query($id: ID!) { bounty(id: $id) { events { kind actor { handle } } } }`
+    const submitted = (result: { data: { bounty: { events: Array<{ kind: string; actor: { handle: string } | null }> } } }) => result.data.bounty.events.find((e) => e.kind === 'CLAIM_SUBMITTED')
+    expect(submitted(await gql(EVENTS, { id: harbor.id }))?.actor).toBeNull()
+    expect(submitted(await gql(EVENTS, { id: harbor.id }, 'alexm'))?.actor).toBeNull()
+    expect(submitted(await gql(EVENTS, { id: harbor.id }, 'harbor_watch'))?.actor?.handle).toBe('jordan_o')
+    expect(submitted(await gql(EVENTS, { id: harbor.id }, 'jordan_o'))?.actor?.handle).toBe('jordan_o')
+  })
+
   it('refuses bounties that break the rules, with a message the form can show', async () => {
     const refused = async (input: Record<string, unknown>, message: RegExp) => {
       const result = await gql(CREATE, { input: { ...property, ...input } }, 'alexm')
@@ -850,7 +871,7 @@ describe('bounties', () => {
     const declined = await gql(`mutation($id: ID!, $note: String!) { declineBounty(id: $id, note: $note) { status } }`, { id: missing.id, note: 'No case number could be confirmed with Woodstock SAPS.' }, 'civicone')
     expect(declined.data.declineBounty.status).toBe('CANCELLED')
     const [refunded] = await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, missing.id))
-    expect(refunded.refundedCents).toBe(300000)
+    expect(refunded?.refundedCents).toBe(300000)
 
     // A new missing-person bounty is approved onto the board.
     const id = await funded('alexm', {
@@ -946,7 +967,7 @@ describe('bounties', () => {
     const bicycle = await seeded('Black Giant')
     expect((await gql(GET, { id: bicycle.id })).data.bounty.status).toBe('PAID')
     const [claim] = await handle.db.select().from(schema.bountyClaims).where(eq(schema.bountyClaims.bountyId, bicycle.id))
-    expect(claim.claimantId).toBeNull()
+    expect(claim?.claimantId).toBeNull()
   })
 
   it('never hands an admin handle to a new sign-in', async () => {

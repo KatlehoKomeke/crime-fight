@@ -167,8 +167,14 @@ BountyRef.implement({
       resolve: async (bounty, _, ctx) => {
         const { isAdmin, isPoster, claim } = await access(bounty, ctx)
         const all = isAdmin || isPoster
-        const rows = await eventsFor(ctx.db, bounty.id, all)
-        return rows.map((event) => ({ ...event, viewerMaySeeNote: all || (claim !== null && event.claimId === claim.id) }))
+        const every = await eventsFor(ctx.db, bounty.id, all)
+        // One happening is written once per person it notifies (PAID tells the claimant and the poster); the trail shows it once.
+        const rows = every.filter((event, index) => !every.slice(0, index).some((earlier) => earlier.kind === event.kind && earlier.claimId === event.claimId && Math.abs(earlier.createdAt.getTime() - event.createdAt.getTime()) < 1000))
+        // Who claimed is between the claimant, the poster and CIVIC/ONE: the public trail says a claim came in, not from whom.
+        return rows.map((event) => {
+          const party = all || (claim !== null && event.claimId === claim.id)
+          return { ...event, actorId: party || !event.claimId ? event.actorId : null, viewerMaySeeNote: party }
+        })
       },
     }),
     reports: t.field({

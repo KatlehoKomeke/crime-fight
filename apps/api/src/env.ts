@@ -22,6 +22,8 @@ export interface ApiEnv {
   paystackSecretArn?: string
   /** Handles (lowercase) who review bounties and release money. */
   adminHandles: Set<string>
+  /** How old an account must be before it can claim a bounty; a thief can't open one to claim their own. */
+  claimMinAccountAgeHours: number
   /** Where Paystack sends people back to; read from SSM when deployed (the Web stack publishes it). */
   siteUrl?: string
   publicConfigParam?: string
@@ -55,6 +57,7 @@ export function readEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
     paystackSecretArn: env.PAYSTACK_SECRET_ARN || undefined,
     // Locally the newsroom demo account reviews bounties, so the admin screens can be tried without configuration.
     adminHandles: new Set((env.ADMIN_HANDLES ?? (deployed ? '' : 'civicone')).split(',').map((h) => h.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)),
+    claimMinAccountAgeHours: env.BOUNTY_CLAIM_MIN_ACCOUNT_AGE_HOURS === undefined ? 72 : Math.max(0, Number(env.BOUNTY_CLAIM_MIN_ACCOUNT_AGE_HOURS) || 0),
     siteUrl: env.SITE_URL || (deployed ? undefined : corsOrigins[0]),
     publicConfigParam: env.PUBLIC_CONFIG_PARAM || undefined,
   }
