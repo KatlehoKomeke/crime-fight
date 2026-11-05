@@ -93,6 +93,7 @@ if (!app.requestSingleInstanceLock()) {
           submenu: [
             { label: 'Home', accelerator: 'CmdOrCtrl+1', click: () => void mainWindow?.loadURL(SITE_URL) },
             { label: 'Notifications', accelerator: 'CmdOrCtrl+2', click: () => void mainWindow?.loadURL(`${SITE_URL}/notifications`) },
+            { label: 'Bounties', accelerator: 'CmdOrCtrl+3', click: () => void mainWindow?.loadURL(`${SITE_URL}/bounties`) },
             { type: 'separator' },
             { role: 'reload' },
             { role: 'togglefullscreen' },

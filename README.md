@@ -7,10 +7,11 @@ Verified local safety updates, official alerts, victim support and the people ke
 | **App** (web SSR · iOS · Android · desktop) | Expo SDK 58, Expo Router (streaming SSR, loaders, metadata), React Native 0.88, urql + Graphcache |
 | **API** | GraphQL Yoga 6 + Pothos 4 (code-first), DataLoader, persisted operations, Cognito JWT auth |
 | **Data** | Aurora PostgreSQL 17 Serverless v2 + PostGIS, Drizzle ORM, RDS Data API |
+| **Payments** | Paystack (ZAR cards, refunds, bank payouts) behind a provider interface; sandbox provider for local/CI |
 | **Infra** | AWS CDK: CloudFront, Lambda (SSR + API), API Gateway, AppSync Events (realtime), Aurora, Cognito, S3 |
 | **Delivery** | GitHub Actions: CI on every PR; every push to `main` deploys **QA**, smoke-tests it, then promotes to **prod** |
 
-Why these choices: [ADR 0001 universal app](docs/adr/0001-universal-app.md) · [ADR 0002 database research](docs/adr/0002-database.md) · [ADR 0003 GraphQL API](docs/adr/0003-graphql-api.md) · [ADR 0004 AWS delivery](docs/adr/0004-aws-delivery.md) · [ADR 0005 direct messages](docs/adr/0005-direct-messages.md)
+Why these choices: [ADR 0001 universal app](docs/adr/0001-universal-app.md) · [ADR 0002 database research](docs/adr/0002-database.md) · [ADR 0003 GraphQL API](docs/adr/0003-graphql-api.md) · [ADR 0004 AWS delivery](docs/adr/0004-aws-delivery.md) · [ADR 0005 direct messages](docs/adr/0005-direct-messages.md) · [ADR 0006 bounties](docs/adr/0006-bounties.md)
 
 ## What's better than the prototype
 
@@ -21,6 +22,7 @@ The prototype was one 289-line component with hard-coded posts. This version kee
 - **Trust you can't fake:** "Verified update / Official source" badges come from verified roles, not post text. Only verified officials and newsrooms can publish alerts.
 - **Privacy by default:** the composer flags ID numbers, card numbers, phone numbers, emails and street addresses *as you type* (no network call). It warns and never blocks: the author decides.
 - **Private messages:** instant one-to-one conversations between people who follow each other, delivered live over AppSync Events, with unread badges that stay in step across devices.
+- **Bounties:** rewards for recoveries, safe returns and information to SAPS, paid in up front, held by CIVIC/ONE, and released only after the poster confirms a claim and an administrator verifies it. Paystack behind a provider interface; a sandbox provider locally; switched off in production until the legal gate is cleared ([ADR 0006](docs/adr/0006-bounties.md)).
 - **Instant interactions:** optimistic likes, reposts, saves and follows over a normalised cache, so one change updates every screen.
 - **Accessible:** semantic roles, labels, live-region toasts, reduced-motion support, visible focus rings, and body text at 15px instead of 8–9px.
 
@@ -32,7 +34,7 @@ apps/
   api/        GraphQL API — src/schema (Pothos), src/data (SQL + DataLoaders), src/handlers (Lambda), test/
   desktop/    Electron shell (macOS · Windows · Linux)
 packages/
-  core/       Shared domain rules: privacy guard, validation, trust badges, formatting, geo
+  core/       Shared domain rules: privacy guard, validation, trust badges, formatting, bounties
   db/         Drizzle schema, SQL migrations, seed data, client factory (node-postgres | Data API)
   graphql/    The contract: schema.graphql, typed documents, persisted-operation manifest (generated)
 infra/        AWS CDK app — Qa/* and Prod/* stages + one-time GitHub OIDC stack
@@ -52,6 +54,8 @@ pnpm dev                   # API on :4000/graphql (GraphiQL, plus realtime on ws
 ```
 
 Locally, sign-in uses **dev mode**: `/sign-in` lists demo accounts (a member, a verified official, a newsroom and a support service), so you can try every permission level without Cognito. Deployed stages use **Google and Apple sign-in only** (see below).
+
+Bounties run against the **sandbox** payment provider locally (`PAYMENTS_PROVIDER=sandbox` and `ADMIN_HANDLES=civicone` are the defaults; see `apps/api/.env.example`): the checkout page is replaced by one that lets you pretend to pay, fail the payment or pay the wrong amount, a payout to an account ending `0000` fails and one ending `9999` reverses, and the newsroom demo account (`civicone`) reviews bounties and releases money. The seed includes bounties with their money rows. The sandbox is refused in deployed stages.
 
 | Command | What it does |
 | --- | --- |
@@ -73,9 +77,32 @@ Locally, sign-in uses **dev mode**: `/sign-in` lists demo accounts (a member, a 
 3. In GitHub → Settings → Environments, create **`qa`** and **`production`**. On each, set variables:
    - `AWS_DEPLOY_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION` (e.g. `af-south-1`)
    - optional: `DOMAIN_NAME`, `CERTIFICATE_ARN` (us-east-1), `HOSTED_ZONE_ID`, `HOSTED_ZONE_NAME`, `ALARM_EMAIL`, and on `production` `API_RESERVED_CONCURRENCY` (e.g. `200`; needs an account Lambda concurrency quota of at least that plus 100, and new accounts start at 10)
+   - for bounties: `ADMIN_HANDLES` (handles who review bounties and release money; nobody by default) and, only once the go-live checklist below is ticked, `PAYSTACK_SECRET_NAME` (the Secrets Manager secret holding the Paystack key). Without a secret name the stage runs with `PAYMENTS_PROVIDER=disabled`: a read-only board.
 4. On **`production`**, add required reviewers if you want a human approval between QA and prod. Without reviewers, every commit flows straight through once QA's smoke test passes.
 
 After that, **every push to `main` deploys**: CI → `Qa/*` → smoke test → `Prod/*`.
+
+### Bounty payments: Paystack behind a secret
+
+Bounties ([ADR 0006](docs/adr/0006-bounties.md)) move money only through Paystack, and only where a stage has a Secrets Manager secret holding the key. Create it as an account administrator (the deploy role can't create secrets), one per stage, as JSON with a separate fingerprint key that is never rotated:
+
+```bash
+aws secretsmanager create-secret --name civic/prod/paystack --secret-string '{"secretKey":"sk_live_…","fingerprintKey":"<openssl rand -base64 32>"}'
+```
+
+Then set `PAYSTACK_SECRET_NAME` (`civic/qa/paystack` with test keys on `qa`, `civic/prod/paystack` on `production`) and `ADMIN_HANDLES` on the GitHub environment and re-run *Deploy*. The stack grants the API read on the secret and switches `PAYMENTS_PROVIDER` to `paystack`; point the Paystack dashboard's webhook at `https://<site>/payments/paystack/webhook`. The hourly sweep that expires, refunds and re-drives pending money runs in prod only (on QA it would keep Aurora awake; run the `sweepBounties` mutation as an admin instead). **Prod stays `PAYMENTS_PROVIDER=disabled`, a read-only board, until the go-live checklist in ADR 0006 is ticked.**
+
+### Go-live checklist for bounties
+
+The full gate is in [ADR 0006](docs/adr/0006-bounties.md#the-go-live-gate). In short:
+
+1. A written legal opinion on holding and paying out posters' money: NPS Act s 7 / Directive 1 of 2007 (TPPP status), the Banks Act deposit question, FICA item 19.
+2. Paystack's written acceptance of the hold-and-payout use case, and confirmation that the balance can fund transfers.
+3. A registered business entity as the Paystack merchant and as the operator named in the terms.
+4. The `civic/prod/paystack` secret created and `PAYSTACK_SECRET_NAME` set on `production`; `ADMIN_HANDLES` names a reviewer whose sign-in has MFA.
+5. A R2 checkout and one R1 transfer on QA with test keys, settled through the webhook and the return page.
+6. Paystack dashboard: live webhook URL set, transfers enabled, OTP approval for transfers off.
+7. Only then the next deploy runs prod with `PAYMENTS_PROVIDER=paystack`.
 
 ### Sign-in: Google and Apple only
 
@@ -108,4 +135,5 @@ Native builds also need `EXPO_PUBLIC_SSO_PROVIDERS=apple,google` in their EAS en
 | CDK stacks | ✅ Synthesize; Lambda bundles invoked locally against Postgres. **Not yet deployed to AWS.** |
 | GitHub Actions | ✅ Written; runs once the repo is pushed and the one-time setup is done |
 | iOS / Android binaries | ⚙️ Configured for EAS; not built yet (needs Expo + Apple/Google accounts) |
-| Next up | Push notifications for messages, real-time alerts (reusing the messaging pipe), image uploads + moderation queue, WAF, CSP, watchOS/Wear OS glance, bundle-size work |
+| Bounties | ✅ Built and tested locally with the sandbox provider (the API tests cover the lifecycle, refunds, the sweep, webhook signatures and the ledger constraints). QA and prod can't run the sandbox (`readEnv` refuses it): QA runs `PAYMENTS_PROVIDER=disabled`, a read-only board, until Paystack test keys are added as `civic/qa/paystack`; prod stays `disabled` until the go-live checklist is ticked |
+| Next up | Paystack test keys on QA, the legal opinion on holding money, photo evidence for claims, push notifications for messages and bounty events, real-time alerts (reusing the messaging pipe), image uploads + moderation queue, WAF, CSP, watchOS/Wear OS glance, bundle-size work |

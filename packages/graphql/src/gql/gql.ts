@@ -73,26 +73,27 @@ type Documents = {
     "\n  query Banks {\n    banks {\n      name\n      code\n    }\n  }\n": typeof types.BanksDocument,
     "\n  query AdminState {\n    viewer {\n      id\n      viewerIsAdmin\n    }\n  }\n": typeof types.AdminStateDocument,
     "\n  query PayoutSettings {\n    viewer {\n      id\n      displayName\n      heldBountyIds\n      payoutAccount {\n        ...PayoutAccountFields\n      }\n    }\n  }\n": typeof types.PayoutSettingsDocument,
-    "\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.CreateBountyDocument,
-    "\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.RetryBountyCheckoutDocument,
-    "\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.ConfirmBountyPaymentDocument,
-    "\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.SandboxCompleteCheckoutDocument,
-    "\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.CancelBountyDocument,
-    "\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.RequestBountyCancellationDocument,
-    "\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.SubmitClaimDocument,
-    "\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.WithdrawClaimDocument,
-    "\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.ConfirmClaimDocument,
-    "\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.RejectClaimDocument,
-    "\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.DisputeClaimDocument,
+    "\n  fragment BountyStateFields on Bounty {\n    id\n    status\n    isExpired\n    claimCount\n    fundedAt\n    expiresAt\n    closedAt\n    frozenFromStatus\n  }\n": typeof types.BountyStateFieldsFragmentDoc,
+    "\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.CreateBountyDocument,
+    "\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.RetryBountyCheckoutDocument,
+    "\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.ConfirmBountyPaymentDocument,
+    "\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.SandboxCompleteCheckoutDocument,
+    "\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.CancelBountyDocument,
+    "\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.RequestBountyCancellationDocument,
+    "\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.SubmitClaimDocument,
+    "\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.WithdrawClaimDocument,
+    "\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.ConfirmClaimDocument,
+    "\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.RejectClaimDocument,
+    "\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.DisputeClaimDocument,
     "\n  mutation ReportBounty($id: ID!, $reason: BountyReportReason!, $note: String) {\n    reportBounty(id: $id, reason: $reason, note: $note) {\n      id\n    }\n  }\n": typeof types.ReportBountyDocument,
     "\n  mutation SetPayoutAccount($input: PayoutAccountInput!) {\n    setPayoutAccount(input: $input) {\n      ...PayoutAccountFields\n    }\n  }\n": typeof types.SetPayoutAccountDocument,
-    "\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": typeof types.DecideClaimDocument,
-    "\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.RetryBountyPayoutDocument,
-    "\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.ApproveBountyDocument,
-    "\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.DeclineBountyDocument,
-    "\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.AdminCancelBountyDocument,
-    "\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.FreezeBountyDocument,
-    "\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": typeof types.UnfreezeBountyDocument,
+    "\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": typeof types.DecideClaimDocument,
+    "\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.RetryBountyPayoutDocument,
+    "\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.ApproveBountyDocument,
+    "\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.DeclineBountyDocument,
+    "\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.AdminCancelBountyDocument,
+    "\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.FreezeBountyDocument,
+    "\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": typeof types.UnfreezeBountyDocument,
     "\n  mutation SweepBounties {\n    sweepBounties {\n      abandoned\n      expired\n      expiring\n      escalated\n      redriven\n    }\n  }\n": typeof types.SweepBountiesDocument,
 };
 const documents: Documents = {
@@ -155,26 +156,27 @@ const documents: Documents = {
     "\n  query Banks {\n    banks {\n      name\n      code\n    }\n  }\n": types.BanksDocument,
     "\n  query AdminState {\n    viewer {\n      id\n      viewerIsAdmin\n    }\n  }\n": types.AdminStateDocument,
     "\n  query PayoutSettings {\n    viewer {\n      id\n      displayName\n      heldBountyIds\n      payoutAccount {\n        ...PayoutAccountFields\n      }\n    }\n  }\n": types.PayoutSettingsDocument,
-    "\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.CreateBountyDocument,
-    "\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.RetryBountyCheckoutDocument,
-    "\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n": types.ConfirmBountyPaymentDocument,
-    "\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyDetailFields\n    }\n  }\n": types.SandboxCompleteCheckoutDocument,
-    "\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n": types.CancelBountyDocument,
-    "\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": types.RequestBountyCancellationDocument,
-    "\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.SubmitClaimDocument,
-    "\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.WithdrawClaimDocument,
-    "\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.ConfirmClaimDocument,
-    "\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.RejectClaimDocument,
-    "\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.DisputeClaimDocument,
+    "\n  fragment BountyStateFields on Bounty {\n    id\n    status\n    isExpired\n    claimCount\n    fundedAt\n    expiresAt\n    closedAt\n    frozenFromStatus\n  }\n": types.BountyStateFieldsFragmentDoc,
+    "\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.CreateBountyDocument,
+    "\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.RetryBountyCheckoutDocument,
+    "\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyStateFields\n    }\n  }\n": types.ConfirmBountyPaymentDocument,
+    "\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyStateFields\n    }\n  }\n": types.SandboxCompleteCheckoutDocument,
+    "\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyStateFields\n    }\n  }\n": types.CancelBountyDocument,
+    "\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": types.RequestBountyCancellationDocument,
+    "\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.SubmitClaimDocument,
+    "\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.WithdrawClaimDocument,
+    "\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.ConfirmClaimDocument,
+    "\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.RejectClaimDocument,
+    "\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.DisputeClaimDocument,
     "\n  mutation ReportBounty($id: ID!, $reason: BountyReportReason!, $note: String) {\n    reportBounty(id: $id, reason: $reason, note: $note) {\n      id\n    }\n  }\n": types.ReportBountyDocument,
     "\n  mutation SetPayoutAccount($input: PayoutAccountInput!) {\n    setPayoutAccount(input: $input) {\n      ...PayoutAccountFields\n    }\n  }\n": types.SetPayoutAccountDocument,
-    "\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n": types.DecideClaimDocument,
-    "\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n": types.RetryBountyPayoutDocument,
-    "\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": types.ApproveBountyDocument,
-    "\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": types.DeclineBountyDocument,
-    "\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": types.AdminCancelBountyDocument,
-    "\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": types.FreezeBountyDocument,
-    "\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n": types.UnfreezeBountyDocument,
+    "\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n": types.DecideClaimDocument,
+    "\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyStateFields\n    }\n  }\n": types.RetryBountyPayoutDocument,
+    "\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": types.ApproveBountyDocument,
+    "\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": types.DeclineBountyDocument,
+    "\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": types.AdminCancelBountyDocument,
+    "\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": types.FreezeBountyDocument,
+    "\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n": types.UnfreezeBountyDocument,
     "\n  mutation SweepBounties {\n    sweepBounties {\n      abandoned\n      expired\n      expiring\n      escalated\n      redriven\n    }\n  }\n": types.SweepBountiesDocument,
 };
 
@@ -431,47 +433,51 @@ export function graphql(source: "\n  query PayoutSettings {\n    viewer {\n     
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  fragment BountyStateFields on Bounty {\n    id\n    status\n    isExpired\n    claimCount\n    fundedAt\n    expiresAt\n    closedAt\n    frozenFromStatus\n  }\n"): (typeof documents)["\n  fragment BountyStateFields on Bounty {\n    id\n    status\n    isExpired\n    claimCount\n    fundedAt\n    expiresAt\n    closedAt\n    frozenFromStatus\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation CreateBounty($input: CreateBountyInput!) {\n    createBounty(input: $input) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation RetryBountyCheckout($id: ID!) {\n    retryBountyCheckout(id: $id) {\n      checkoutUrl\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation ConfirmBountyPayment($id: ID!) {\n    confirmBountyPayment(id: $id) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {\n    sandboxCompleteCheckout(id: $id, outcome: $outcome) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation CancelBounty($id: ID!) {\n    cancelBounty(id: $id) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation RequestBountyCancellation($id: ID!, $note: String!) {\n    requestBountyCancellation(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {\n    submitClaim(bountyId: $bountyId, input: $input) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation WithdrawClaim($id: ID!) {\n    withdrawClaim(id: $id) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation ConfirmClaim($id: ID!, $note: String) {\n    confirmClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation RejectClaim($id: ID!, $note: String!) {\n    rejectClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation DisputeClaim($id: ID!, $note: String!) {\n    disputeClaim(id: $id, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -483,31 +489,31 @@ export function graphql(source: "\n  mutation SetPayoutAccount($input: PayoutAcc
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      ...ClaimFields\n      bounty {\n        ...BountyDetailFields\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {\n    decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {\n      id\n      status\n      bounty {\n        ...BountyStateFields\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation RetryBountyPayout($id: ID!) {\n    retryBountyPayout(id: $id) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation ApproveBounty($id: ID!, $note: String!) {\n    approveBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation DeclineBounty($id: ID!, $note: String!) {\n    declineBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation AdminCancelBounty($id: ID!, $note: String!) {\n    adminCancelBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation FreezeBounty($id: ID!, $note: String!) {\n    freezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"): (typeof documents)["\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyDetailFields\n    }\n  }\n"];
+export function graphql(source: "\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"): (typeof documents)["\n  mutation UnfreezeBounty($id: ID!, $note: String!) {\n    unfreezeBounty(id: $id, note: $note) {\n      ...BountyStateFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

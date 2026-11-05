@@ -38,12 +38,12 @@ export default function NotificationsScreen() {
         onRefresh={notifications.refresh}
         empty={
           signedIn ? (
-            <EmptyState icon="bell" title="Nothing yet" body="Replies, likes, reposts and new followers show up here, along with official alerts." />
+            <EmptyState icon="bell" title="Nothing yet" body="Replies, likes, reposts, new followers and activity on your bounties show up here, along with official alerts." />
           ) : (
             <EmptyState
               icon="bell"
               title="No active alerts"
-              body="Nothing official right now. Sign in to also hear about replies, likes, reposts and new followers."
+              body="Nothing official right now. Sign in to also hear about replies, likes, reposts, new followers and activity on your bounties."
               action={status === 'signed-out' ? <Button label="Sign in" onPress={() => router.push('/sign-in')} /> : undefined}
             />
           )

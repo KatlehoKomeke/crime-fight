@@ -19,6 +19,8 @@ import { Avatar, Button, Chip, Txt } from './ui'
 
 interface Props {
   replyTo?: { id: string; handle: string }
+  /** Text to start from, e.g. sharing a bounty as an update. */
+  initialBody?: string
   autoFocus?: boolean
   compact?: boolean
   onPosted?: () => void
@@ -28,13 +30,13 @@ interface Props {
  * Composer with an on-device privacy guard: personal data is flagged as you
  * type (no network call). It warns and never blocks; the author decides.
  */
-export function Composer({ replyTo, autoFocus, compact, onPosted }: Props) {
+export function Composer({ replyTo, initialBody, autoFocus, compact, onPosted }: Props) {
   const c = useColors()
   const toast = useToast()
   const { status } = useAuth()
   const [{ data: viewerData }] = useQuery({ query: ViewerQuery, pause: status !== 'signed-in' })
   const [{ fetching }, createPost] = useMutation(CreatePost)
-  const [body, setBody] = useState('')
+  const [body, setBody] = useState(initialBody ?? '')
   const [kind, setKind] = useState<PostKind>('UPDATE')
   const [severity, setSeverity] = useState<AlertSeverity>('ADVISORY')
   const [serverError, setServerError] = useState<string | null>(null)

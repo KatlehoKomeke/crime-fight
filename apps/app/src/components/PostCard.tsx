@@ -8,6 +8,7 @@ import { ActivityIndicator, Modal, Platform, Pressable, Share, StyleSheet, View 
 import { useMutation } from 'urql'
 import { DeletePost, LikePost, RepostPost, SavePost, UnlikePost, UnrepostPost, UnsavePost } from '@/graphql/documents'
 import { getConfig } from '@/lib/config'
+import { usePaymentsStatus } from '@/lib/payments'
 import { profilePath } from '@/lib/profile'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { fonts, radius, useColors } from '@/theme'
@@ -15,6 +16,7 @@ import { useCompose } from './ComposeProvider'
 import { Icon, type IconName } from './Icon'
 import { RichText } from './RichText'
 import { useToast } from './Toast'
+import { BountyChip } from './bounties/BountyChip'
 import { Avatar, Touchable, TrustChip, Txt, VerifiedBadge } from './ui'
 
 type Post = PostCardFieldsFragment
@@ -80,6 +82,7 @@ export const PostCard = memo(function PostCard({ post, variant = 'feed' }: { pos
         <RichText body={post.body} style={detail ? styles.detailBody : styles.body} />
 
         {post.kind !== 'UPDATE' ? <AlertCard post={post} onOpen={detail ? undefined : () => router.push(href)} /> : null}
+        {post.bounty ? <BountyChip bounty={post.bounty} /> : null}
         {post.media.map((media) => (
           <PostImage key={media.id} url={media.url} alt={media.alt} caption={media.caption ?? post.area} />
         ))}
@@ -253,6 +256,7 @@ function PostMenu({ post, deleting, onDeleting }: { post: Post; deleting: boolea
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [, remove] = useMutation(DeletePost)
+  const payments = usePaymentsStatus()
 
   const items: Array<{ icon: IconName; label: string; danger?: boolean; run: () => void }> = [
     {
@@ -285,6 +289,10 @@ function PostMenu({ post, deleting, onDeleting }: { post: Post; deleting: boolea
         })
       },
     })
+  }
+  // Only the author can attach a reward, and only to a top-level update that has none yet.
+  if (post.viewerCanDelete && !post.replyTo && !post.bounty && payments.enabled) {
+    items.unshift({ icon: 'bounty', label: 'Post a bounty for this', run: () => router.push({ pathname: '/bounties/new', params: { postId: post.id } }) })
   }
 
   if (deleting) return <ActivityIndicator size="small" color={c.textMuted} style={styles.menuButton} accessibilityLabel="Deleting post" />

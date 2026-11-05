@@ -7,6 +7,8 @@ import { IconButton, Txt } from './ui'
 
 interface ComposeOptions {
   replyTo?: { id: string; handle: string }
+  /** Text to start from, e.g. sharing a bounty as an update. */
+  initialBody?: string
 }
 
 const ComposeContext = createContext<{ openCompose: (options?: ComposeOptions) => void }>({ openCompose: () => undefined })
@@ -51,7 +53,7 @@ export function ComposeProvider({ children }: { children: ReactNode }) {
                 <Txt variant="label">{state.replyTo ? 'Reply' : 'Report a crime'}</Txt>
                 <View style={{ width: 36 }} />
               </View>
-              {state.open ? <Composer replyTo={state.replyTo} autoFocus onPosted={close} /> : null}
+              {state.open ? <Composer replyTo={state.replyTo} initialBody={state.initialBody} autoFocus onPosted={close} /> : null}
             </Pressable>
           </KeyboardAvoidingView>
         </Pressable>

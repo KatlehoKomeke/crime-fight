@@ -88,17 +88,30 @@ const applyInboxEvent = (event: InboxEventFieldsFragment | null | undefined, cac
   if (!inInbox) invalidateField(cache, 'Query', 'conversations')
 }
 
+/** What the detail page shows about a bounty beyond the state a mutation returns. */
+const BOUNTY_DETAIL_FIELDS = ['claims', 'events', 'viewerClaim', 'winningClaim', 'reports', 'ledger', 'latestPayout']
+
 /**
- * A bounty moved (posted, paid for, claimed, decided, closed): every list it
- * could appear in refetches the next time it's shown. Mutations return the
- * bounty itself, so the entity is already current.
+ * A bounty moved (posted, paid for, claimed, decided, closed). Mutations return
+ * only its new state, so the rest of what's cached about it (claims, activity,
+ * what the viewer may do) is dropped and the screens showing it refetch, as
+ * does every list it could appear in. The state fields themselves stay: the
+ * mutation's own result is read back from the cache after this runs.
  */
-const bountiesChanged = (cache: Cache) => {
+const bountyChanged = (result: Record<string, unknown>, cache: Cache) => {
+  for (const payload of Object.values(result)) {
+    const node = payload as { __typename?: string; id?: string; bounty?: { id?: string } | null } | null
+    const id = node?.__typename === 'Bounty' ? node.id : node?.bounty?.id
+    if (!id) continue
+    const entity = cache.keyOfEntity({ __typename: 'Bounty', id })
+    if (entity) for (const field of BOUNTY_DETAIL_FIELDS) cache.invalidate(entity, field)
+  }
   for (const field of ['bounties', 'myBounties', 'myClaims', 'bountyQueue']) invalidateField(cache, 'Query', field)
   const viewer = cache.resolve('Query', 'viewer') as string | null
   if (!viewer) return
   invalidateField(cache, viewer, 'bounties')
   cache.invalidate(viewer, 'bountyCount')
+  cache.invalidate(viewer, 'heldBountyIds')
 }
 
 /**
@@ -191,23 +204,25 @@ export const cacheConfig: CacheExchangeOpts = {
       unfollowUser: (_result, args, cache) => followChanged(args as Args, cache),
       sendMessage: (result, _args, cache) => applyInboxEvent(result.sendMessage as InboxEventFieldsFragment, cache),
       markConversationRead: (result, _args, cache) => applyInboxEvent(result.markConversationRead as InboxEventFieldsFragment, cache),
-      createBounty: (_result, _args, cache) => bountiesChanged(cache),
-      confirmBountyPayment: (_result, _args, cache) => bountiesChanged(cache),
-      sandboxCompleteCheckout: (_result, _args, cache) => bountiesChanged(cache),
-      cancelBounty: (_result, _args, cache) => bountiesChanged(cache),
-      submitClaim: (_result, _args, cache) => bountiesChanged(cache),
-      withdrawClaim: (_result, _args, cache) => bountiesChanged(cache),
-      confirmClaim: (_result, _args, cache) => bountiesChanged(cache),
-      rejectClaim: (_result, _args, cache) => bountiesChanged(cache),
-      disputeClaim: (_result, _args, cache) => bountiesChanged(cache),
-      decideClaim: (_result, _args, cache) => bountiesChanged(cache),
-      retryBountyPayout: (_result, _args, cache) => bountiesChanged(cache),
-      approveBounty: (_result, _args, cache) => bountiesChanged(cache),
-      declineBounty: (_result, _args, cache) => bountiesChanged(cache),
-      adminCancelBounty: (_result, _args, cache) => bountiesChanged(cache),
-      freezeBounty: (_result, _args, cache) => bountiesChanged(cache),
-      unfreezeBounty: (_result, _args, cache) => bountiesChanged(cache),
-      sweepBounties: (_result, _args, cache) => bountiesChanged(cache),
+      createBounty: (result, _args, cache) => bountyChanged(result, cache),
+      retryBountyCheckout: (result, _args, cache) => bountyChanged(result, cache),
+      confirmBountyPayment: (result, _args, cache) => bountyChanged(result, cache),
+      sandboxCompleteCheckout: (result, _args, cache) => bountyChanged(result, cache),
+      cancelBounty: (result, _args, cache) => bountyChanged(result, cache),
+      requestBountyCancellation: (result, _args, cache) => bountyChanged(result, cache),
+      submitClaim: (result, _args, cache) => bountyChanged(result, cache),
+      withdrawClaim: (result, _args, cache) => bountyChanged(result, cache),
+      confirmClaim: (result, _args, cache) => bountyChanged(result, cache),
+      rejectClaim: (result, _args, cache) => bountyChanged(result, cache),
+      disputeClaim: (result, _args, cache) => bountyChanged(result, cache),
+      decideClaim: (result, _args, cache) => bountyChanged(result, cache),
+      retryBountyPayout: (result, _args, cache) => bountyChanged(result, cache),
+      approveBounty: (result, _args, cache) => bountyChanged(result, cache),
+      declineBounty: (result, _args, cache) => bountyChanged(result, cache),
+      adminCancelBounty: (result, _args, cache) => bountyChanged(result, cache),
+      freezeBounty: (result, _args, cache) => bountyChanged(result, cache),
+      unfreezeBounty: (result, _args, cache) => bountyChanged(result, cache),
+      sweepBounties: (result, _args, cache) => bountyChanged(result, cache),
       // The mutation returns the account; the viewer's link to it is what changed.
       setPayoutAccount: (_result, _args, cache) => {
         const viewer = cache.resolve('Query', 'viewer') as string | null

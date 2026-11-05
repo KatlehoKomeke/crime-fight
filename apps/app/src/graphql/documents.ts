@@ -1051,12 +1051,29 @@ export const PayoutSettingsQuery = graphql(`
   }
 `)
 
+// What a mutation can change about a bounty. Mutations return only this and the
+// cache drops the rest of the entity (bountyChanged in lib/graphql/cache.ts), so
+// the screens showing it refetch: every operation stays small, and nothing shown
+// after an action is older than the action.
+export const BountyStateFields = graphql(`
+  fragment BountyStateFields on Bounty {
+    id
+    status
+    isExpired
+    claimCount
+    fundedAt
+    expiresAt
+    closedAt
+    frozenFromStatus
+  }
+`)
+
 export const CreateBounty = graphql(`
   mutation CreateBounty($input: CreateBountyInput!) {
     createBounty(input: $input) {
       checkoutUrl
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1067,7 +1084,7 @@ export const RetryBountyCheckout = graphql(`
     retryBountyCheckout(id: $id) {
       checkoutUrl
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1076,7 +1093,7 @@ export const RetryBountyCheckout = graphql(`
 export const ConfirmBountyPayment = graphql(`
   mutation ConfirmBountyPayment($id: ID!) {
     confirmBountyPayment(id: $id) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1085,7 +1102,7 @@ export const ConfirmBountyPayment = graphql(`
 export const SandboxCompleteCheckout = graphql(`
   mutation SandboxCompleteCheckout($id: ID!, $outcome: String) {
     sandboxCompleteCheckout(id: $id, outcome: $outcome) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1093,7 +1110,7 @@ export const SandboxCompleteCheckout = graphql(`
 export const CancelBounty = graphql(`
   mutation CancelBounty($id: ID!) {
     cancelBounty(id: $id) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1101,7 +1118,7 @@ export const CancelBounty = graphql(`
 export const RequestBountyCancellation = graphql(`
   mutation RequestBountyCancellation($id: ID!, $note: String!) {
     requestBountyCancellation(id: $id, note: $note) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1109,9 +1126,10 @@ export const RequestBountyCancellation = graphql(`
 export const SubmitClaim = graphql(`
   mutation SubmitClaim($bountyId: ID!, $input: SubmitClaimInput!) {
     submitClaim(bountyId: $bountyId, input: $input) {
-      ...ClaimFields
+      id
+      status
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1120,9 +1138,10 @@ export const SubmitClaim = graphql(`
 export const WithdrawClaim = graphql(`
   mutation WithdrawClaim($id: ID!) {
     withdrawClaim(id: $id) {
-      ...ClaimFields
+      id
+      status
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1131,9 +1150,10 @@ export const WithdrawClaim = graphql(`
 export const ConfirmClaim = graphql(`
   mutation ConfirmClaim($id: ID!, $note: String) {
     confirmClaim(id: $id, note: $note) {
-      ...ClaimFields
+      id
+      status
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1142,9 +1162,10 @@ export const ConfirmClaim = graphql(`
 export const RejectClaim = graphql(`
   mutation RejectClaim($id: ID!, $note: String!) {
     rejectClaim(id: $id, note: $note) {
-      ...ClaimFields
+      id
+      status
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1153,9 +1174,10 @@ export const RejectClaim = graphql(`
 export const DisputeClaim = graphql(`
   mutation DisputeClaim($id: ID!, $note: String!) {
     disputeClaim(id: $id, note: $note) {
-      ...ClaimFields
+      id
+      status
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1182,9 +1204,10 @@ export const SetPayoutAccount = graphql(`
 export const DecideClaim = graphql(`
   mutation DecideClaim($id: ID!, $decision: ClaimDecision!, $reason: ClaimDecisionReason!, $note: String!) {
     decideClaim(id: $id, decision: $decision, reason: $reason, note: $note) {
-      ...ClaimFields
+      id
+      status
       bounty {
-        ...BountyDetailFields
+        ...BountyStateFields
       }
     }
   }
@@ -1193,7 +1216,7 @@ export const DecideClaim = graphql(`
 export const RetryBountyPayout = graphql(`
   mutation RetryBountyPayout($id: ID!) {
     retryBountyPayout(id: $id) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1201,7 +1224,7 @@ export const RetryBountyPayout = graphql(`
 export const ApproveBounty = graphql(`
   mutation ApproveBounty($id: ID!, $note: String!) {
     approveBounty(id: $id, note: $note) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1209,7 +1232,7 @@ export const ApproveBounty = graphql(`
 export const DeclineBounty = graphql(`
   mutation DeclineBounty($id: ID!, $note: String!) {
     declineBounty(id: $id, note: $note) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1217,7 +1240,7 @@ export const DeclineBounty = graphql(`
 export const AdminCancelBounty = graphql(`
   mutation AdminCancelBounty($id: ID!, $note: String!) {
     adminCancelBounty(id: $id, note: $note) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1225,7 +1248,7 @@ export const AdminCancelBounty = graphql(`
 export const FreezeBounty = graphql(`
   mutation FreezeBounty($id: ID!, $note: String!) {
     freezeBounty(id: $id, note: $note) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)
@@ -1233,7 +1256,7 @@ export const FreezeBounty = graphql(`
 export const UnfreezeBounty = graphql(`
   mutation UnfreezeBounty($id: ID!, $note: String!) {
     unfreezeBounty(id: $id, note: $note) {
-      ...BountyDetailFields
+      ...BountyStateFields
     }
   }
 `)

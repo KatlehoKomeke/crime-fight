@@ -106,6 +106,7 @@ function ProfileScreen({ handle }: { handle: string }) {
                   <View style={styles.stats}>
                     <CountLink href={profilePath(user.handle, 'following')} count={user.followingCount} label="following" />
                     <CountLink href={profilePath(user.handle, 'followers')} count={user.followerCount} label={user.followerCount === 1 ? 'follower' : 'followers'} />
+                    <CountLink href={profilePath(user.handle, 'bounties')} count={user.bountyCount} label={user.bountyCount === 1 ? 'bounty' : 'bounties'} />
                     <Txt variant="small" color="textMuted">
                       Joined {new Date(user.createdAt).toLocaleDateString('en', { month: 'long', year: 'numeric' })}
                     </Txt>
