@@ -9,6 +9,7 @@ import {
   CLAIM_STATUSES,
   PAYOUT_ACCOUNT_STATUSES,
   payoutAccountReadyAt,
+  posterAnswerDue,
 } from '@civic/core'
 import type { Bounty, BountyClaim, BountyEvent, BountyReport, LedgerEntry, PayoutAccount, User } from '@civic/db'
 import type { Context } from '../context'
@@ -16,9 +17,11 @@ import {
   activePayoutAccount,
   adminCancelBounty,
   approveBounty,
+  approvedClaimIds,
   bountyById,
   cancelBounty,
   canSeeBounty,
+  claimsBeingChecked,
   claimsFor,
   confirmClaim,
   confirmPayment,
@@ -26,7 +29,6 @@ import {
   createBounty,
   declineBounty,
   decideClaim,
-  disputeClaim,
   eventsFor,
   freezeBounty,
   heldForUser,
@@ -36,8 +38,8 @@ import {
   pageBoard,
   pageMyBounties,
   pageMyClaims,
+  objectToClaim,
   pageUserBounties,
-  rejectClaim,
   releasePreflight,
   type ReleasePreflight,
   reportBounty,
@@ -68,7 +70,10 @@ export const ClaimDecisionReason = builder.enumType('ClaimDecisionReason', { val
 export const BountyEventKind = builder.enumType('BountyEventKind', { values: BOUNTY_EVENT_KINDS })
 export const BountyReportReason = builder.enumType('BountyReportReason', { values: BOUNTY_REPORT_REASONS })
 export const PayoutAccountStatus = builder.enumType('PayoutAccountStatus', { values: PAYOUT_ACCOUNT_STATUSES })
-export const ClaimDecision = builder.enumType('ClaimDecision', { values: ['VERIFY', 'REJECT'] as const })
+export const ClaimDecision = builder.enumType('ClaimDecision', {
+  values: ['APPROVE', 'VERIFY', 'REJECT'] as const,
+  description: 'APPROVE a new claim after checking it (the poster then confirms or objects), VERIFY one to pay it, or REJECT.',
+})
 export const PaymentsStatus = builder.enumType('PaymentsStatus', {
   values: ['DISABLED', 'SANDBOX', 'PAYSTACK_TEST', 'PAYSTACK_LIVE'] as const,
   description: 'Whether bounties can be posted: DISABLED lists them read-only until payments go live.',
@@ -97,7 +102,15 @@ async function access(bounty: Bounty, ctx: Context) {
   return { viewer, isAdmin, isPoster, claim }
 }
 
-const money = (ctx: Context) => ({ db: ctx.db, payments: ctx.payments })
+const money = (ctx: Context) => ({ db: ctx.db, payments: ctx.payments, adminHandles: ctx.adminHandles })
+
+/** Whether the viewer is an admin, or posted the bounty this claim is on. */
+async function posterOrAdmin(claim: BountyClaim, ctx: Context): Promise<boolean> {
+  if (await ctx.isAdmin()) return true
+  const viewer = await ctx.viewer()
+  if (!viewer) return false
+  return (await ctx.loaders.bounty.load(claim.bountyId))?.posterId === viewer.id
+}
 
 BountyRef.implement({
   description: 'A reward, paid in up front and held by CIVIC/ONE, for a verifiable outcome.',
@@ -153,21 +166,28 @@ BountyRef.implement({
     viewerClaim: t.field({ type: BountyClaimRef, nullable: true, resolve: async (bounty, _, ctx) => (await access(bounty, ctx)).claim }),
     claims: t.field({
       type: [BountyClaimRef],
-      description: 'Every claim, oldest first. Poster and admins only; others get an empty list. Withdrawn claims are for admins only.',
+      description: 'Claims, oldest first. Admins see every one; the poster only those CIVIC/ONE has approved; everyone else an empty list.',
       resolve: async (bounty, _, ctx) => {
         const { isAdmin, isPoster } = await access(bounty, ctx)
-        return isAdmin ? claimsFor(ctx.db, bounty.id, true) : isPoster ? claimsFor(ctx.db, bounty.id) : []
+        return isAdmin ? claimsFor(ctx.db, bounty.id, 'admin') : isPoster ? claimsFor(ctx.db, bounty.id, 'poster') : []
+      },
+    }),
+    claimsBeingChecked: t.int({
+      description: 'Claims CIVIC/ONE is still checking, which the poster can’t see yet. Poster and admins only; 0 for everyone else.',
+      resolve: async (bounty, _, ctx) => {
+        const { isAdmin, isPoster } = await access(bounty, ctx)
+        return isAdmin || isPoster ? claimsBeingChecked(ctx.db, bounty.id) : 0
       },
     }),
     winningClaim: t.field({
       type: BountyClaimRef,
       nullable: true,
-      description: 'The confirmed, verified or paid claim. Poster and admins only.',
+      description: 'The claim CIVIC/ONE approved, through to paid. Poster and admins only.',
       resolve: async (bounty, _, ctx) => {
         if (!bounty.winningClaimId) return null
         const { isAdmin, isPoster } = await access(bounty, ctx)
         if (!isAdmin && !isPoster) return null
-        return (await claimsFor(ctx.db, bounty.id, true)).find((row) => row.id === bounty.winningClaimId) ?? null
+        return (await claimsFor(ctx.db, bounty.id, isAdmin ? 'admin' : 'poster')).find((row) => row.id === bounty.winningClaimId) ?? null
       },
     }),
     events: t.field({
@@ -178,9 +198,11 @@ BountyRef.implement({
         const every = await eventsFor(ctx.db, bounty.id, { all: isAdmin, id: viewer?.id ?? null })
         // One happening is written once per person it tells (PAID tells the claimant and the poster); the trail shows it once.
         const rows = every.filter((event, index) => !every.slice(0, index).some((earlier) => earlier.kind === event.kind && earlier.claimId === event.claimId && Math.abs(earlier.createdAt.getTime() - event.createdAt.getTime()) < 1000))
-        // Who claimed is between the claimant, the poster and CIVIC/ONE: the public trail says a claim came in, not from whom.
+        // Who claimed is between the claimant and CIVIC/ONE until CIVIC/ONE approves the claim, and the poster after that.
+        // The public trail says a claim came in, never from whom.
+        const shownToPoster = isPoster ? await approvedClaimIds(ctx.db, bounty.id) : new Set<string>()
         return rows.map((event) => {
-          const party = isAdmin || isPoster || (claim !== null && event.claimId === claim.id)
+          const party = event.claimId ? isAdmin || (claim !== null && event.claimId === claim.id) || shownToPoster.has(event.claimId) : isAdmin || isPoster
           const addressed = viewer !== null && (event.recipientId === viewer.id || event.actorId === viewer.id)
           return { ...event, actorId: party || !event.claimId ? event.actorId : null, viewerMaySeeNote: party || addressed }
         })
@@ -214,17 +236,22 @@ BountyClaimRef.implement({
     status: t.field({ type: ClaimStatus, resolve: (claim) => claim.status }),
     body: t.exposeString('body'),
     links: t.stringList({ resolve: (claim) => claim.links.split('\n').filter(Boolean) }),
-    posterNote: t.exposeString('posterNote', { nullable: true, description: 'The poster’s reason for declining, which the claimant sees.' }),
+    posterNote: t.string({
+      nullable: true,
+      description: 'Why the poster objected to the claim, for the reviewer. Poster and admins only.',
+      resolve: async (claim, _, ctx) => ((await posterOrAdmin(claim, ctx)) ? claim.posterNote : null),
+    }),
     confirmNote: t.string({
       nullable: true,
       description: 'What the poster told the reviewer when confirming. Poster and admins only.',
-      resolve: async (claim, _, ctx) => {
-        if (!claim.confirmNote) return null
-        if (await ctx.isAdmin()) return claim.confirmNote
-        const viewer = await ctx.viewer()
-        const bounty = viewer ? await ctx.loaders.bounty.load(claim.bountyId) : null
-        return bounty && bounty.posterId === viewer!.id ? claim.confirmNote : null
-      },
+      resolve: async (claim, _, ctx) => ((await posterOrAdmin(claim, ctx)) ? claim.confirmNote : null),
+    }),
+    approvedAt: t.field({ type: 'DateTime', nullable: true, description: 'When CIVIC/ONE approved it; the cooling-off period runs from here.', resolve: (claim) => claim.approvedAt }),
+    posterAnswerDue: t.field({
+      type: 'DateTime',
+      nullable: true,
+      description: 'Until when the poster can confirm or object to an approved claim; after that, silence counts as no objection.',
+      resolve: (claim) => (claim.approvedAt ? posterAnswerDue(claim.approvedAt) : null),
     }),
     disputeNote: t.exposeString('disputeNote', { nullable: true }),
     decisionReason: t.field({ type: ClaimDecisionReason, nullable: true, resolve: (claim) => claim.decisionReason }),
@@ -529,20 +556,15 @@ builder.mutationFields((t) => ({
   }),
   confirmClaim: t.field({
     type: BountyClaimRef,
-    description: 'The poster confirms the outcome happened. CIVIC/ONE verifies after the cooling-off period.',
+    description: 'The poster confirms the outcome of a claim CIVIC/ONE approved. CIVIC/ONE pays after the cooling-off period.',
     args: { id: t.arg.id({ required: true }), note: t.arg.string() },
     resolve: async (_root, args, ctx) => confirmClaim(money(ctx), await ctx.requireViewer(), String(args.id), args.note),
   }),
-  rejectClaim: t.field({
+  objectToClaim: t.field({
     type: BountyClaimRef,
+    description: 'The poster objects to a claim CIVIC/ONE approved, with a reason for the reviewer. CIVIC/ONE decides, and may pay anyway.',
     args: { id: t.arg.id({ required: true }), note: t.arg.string({ required: true }) },
-    resolve: async (_root, args, ctx) => rejectClaim(money(ctx), await ctx.requireViewer(), String(args.id), args.note),
-  }),
-  disputeClaim: t.field({
-    type: BountyClaimRef,
-    description: 'The claimant disagrees with a rejection; CIVIC/ONE decides.',
-    args: { id: t.arg.id({ required: true }), note: t.arg.string({ required: true }) },
-    resolve: async (_root, args, ctx) => disputeClaim(money(ctx), await ctx.requireViewer(), String(args.id), args.note),
+    resolve: async (_root, args, ctx) => objectToClaim(money(ctx), await ctx.requireViewer(), String(args.id), args.note),
   }),
   setPayoutAccount: t.field({
     type: PayoutAccountRef,
@@ -559,7 +581,7 @@ builder.mutationFields((t) => ({
   // Admin.
   decideClaim: t.field({
     type: BountyClaimRef,
-    description: 'Verifies (and pays) or rejects a confirmed or disputed claim. Admins only.',
+    description: 'Approves a new claim, verifies (and pays) one the poster answered, or rejects. Admins only.',
     args: { id: t.arg.id({ required: true }), decision: t.arg({ type: ClaimDecision, required: true }), reason: t.arg({ type: ClaimDecisionReason, required: true }), note: t.arg.string({ required: true }) },
     resolve: async (_root, args, ctx) => decideClaim(money(ctx), await ctx.requireAdmin(), String(args.id), args.decision, args.reason, args.note),
   }),

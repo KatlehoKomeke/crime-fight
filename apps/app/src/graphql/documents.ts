@@ -117,6 +117,7 @@ export const NotificationsQuery = graphql(`
             amountCents
             status
             kind
+            viewerIsPoster
           }
         }
       }
@@ -725,9 +726,10 @@ export const ClaimFields = graphql(`
     decisionReason
     decisionNote
     createdAt
+    approvedAt
+    posterAnswerDue
     confirmedAt
     cooldownUntil
-    rejectedAt
     decidedAt
     viewerIsClaimant
     claimant {
@@ -768,6 +770,7 @@ export const BountyDetailFields = graphql(`
     relationship
     frozenFromStatus
     removedAt
+    claimsBeingChecked
     poster {
       ...UserRowFields
       viewerCanMessage
@@ -950,6 +953,8 @@ export const BountyQueueQuery = graphql(`
             id
             status
             createdAt
+            approvedAt
+            posterAnswerDue
             confirmedAt
             cooldownUntil
             claimant {
@@ -1161,21 +1166,9 @@ export const ConfirmClaim = graphql(`
   }
 `)
 
-export const RejectClaim = graphql(`
-  mutation RejectClaim($id: ID!, $note: String!) {
-    rejectClaim(id: $id, note: $note) {
-      id
-      status
-      bounty {
-        ...BountyStateFields
-      }
-    }
-  }
-`)
-
-export const DisputeClaim = graphql(`
-  mutation DisputeClaim($id: ID!, $note: String!) {
-    disputeClaim(id: $id, note: $note) {
+export const ObjectToClaim = graphql(`
+  mutation ObjectToClaim($id: ID!, $note: String!) {
+    objectToClaim(id: $id, note: $note) {
       id
       status
       bounty {

@@ -7,7 +7,6 @@ import {
   BOUNTY_MAX_CENTS,
   BOUNTY_MIN_CENTS,
   BOUNTY_OPEN_MAX_PER_POSTER,
-  CLAIM_DISPUTE_DAYS,
   CLAIM_POSTER_RESPONSE_DAYS,
   CLAIMS_PER_DAY_MAX,
   formatZar,
@@ -42,7 +41,7 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'What a bounty is',
     blocks: [
-      'A member who suffered a crime posts a reward: for a stolen vehicle or item recovered through the South African Police Service (SAPS), for a missing person found safe, or for information handed to SAPS. They pay the full amount in before the bounty is listed. CIVIC/ONE holds it. The money isn’t spent, lent or invested, and it goes one of two ways: to the person who honours the bounty, once the poster confirms their claim and we verify it, or back to the poster.',
+      'A member who suffered a crime posts a reward: for a stolen vehicle or item recovered through the South African Police Service (SAPS), for a missing person found safe, or for information handed to SAPS. They pay the full amount in before the bounty is listed. CIVIC/ONE holds it. The money isn’t spent, lent or invested, and it goes one of two ways: to the person who honours the bounty, once we have checked their claim, the poster has confirmed it or had the chance to object, and we have verified it; or back to the poster.',
       'A bounty is not a police case, and nobody at SAPS sees it. It doesn’t replace reporting the crime, and we don’t investigate crimes, recover property or search for people. In an emergency, call 10111 for the police, or 112 from a mobile phone.',
     ],
   },
@@ -85,20 +84,21 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'Claims',
     blocks: [
-      'If you honoured a bounty, you can claim it from its page. Your account must be at least three days old. You can’t claim your own bounty, a bounty for a crime you were involved in, or a recovery of property you bought, received or kept knowing or suspecting it was stolen.',
-      'Only the poster and CIVIC/ONE’s reviewers see your claim; the public doesn’t. Say what you did and when, and what you handed to SAPS and where. For each kind of bounty, a claim must say:',
+      'If you honoured a bounty, you can claim it from its page. Your account must be at least three days old, and you must first add the bank account the reward should be paid into, under Payouts in [Settings](/settings). You can’t claim your own bounty, a bounty for a crime you were involved in, or a recovery of property you bought, received or kept knowing or suspecting it was stolen.',
+      'CIVIC/ONE’s reviewers see your claim first. The poster sees it, and who sent it, only once we have checked and approved it. The public never does. Say what you did and when, and what you handed to SAPS and where. For each kind of bounty, a claim must say:',
       BOUNTY_KINDS.map((kind) => `${BOUNTY_KIND_RULES[kind].label}: ${BOUNTY_KIND_RULES[kind].evidence}`),
       'Don’t include anyone’s ID number, phone number or address, and don’t name people you suspect: describe what you gave SAPS instead. Property comes back through SAPS. Never buy it back from whoever has it: receiving stolen property is an offence, and we don’t pay for it.',
-      `You can have one claim on a bounty at a time, and submit up to ${CLAIMS_PER_DAY_MAX} claims a day. We pay one claim per bounty: the one the poster confirms and we verify. If more than one person helped, agree between you how to share the reward before you claim, because we pay only the account on the claim.`,
+      `You can claim a bounty once, and submit up to ${CLAIMS_PER_DAY_MAX} claims a day. We pay one claim per bounty: the one we approve and verify. If more than one person helped, agree between you how to share the reward before you claim, because we pay only the account on the claim.`,
     ],
   },
   {
-    heading: 'Confirming, waiting and verifying',
+    heading: 'Checking, confirming and paying',
     blocks: [
-      `When a claim comes in, the poster has ${CLAIM_POSTER_RESPONSE_DAYS} days to confirm or decline it. If they don’t answer, the claim goes to a CIVIC/ONE administrator to decide. While a claim is being verified, the bounty doesn’t take new claims.`,
-      'After the poster confirms a claim, a cooling-off period runs before anything can be paid:',
+      'When a claim comes in, a CIVIC/ONE administrator checks it first, for example against the SAPS case and with the station the claimant names. The poster is told that a claim came in, but not what it says or who sent it. If we reject a claim, the claimant sees the reason and the poster never sees the claim.',
+      `Once we approve a claim, the poster sees it and has ${CLAIM_POSTER_RESPONSE_DAYS} days to confirm that the outcome happened, or to object and say why. If the poster doesn’t answer, that counts as no objection. If the poster objects, an administrator looks at the reason and decides: we have the final say, and we may pay the claim anyway. While an approved claim is being decided, the bounty doesn’t take new claims.`,
+      'A cooling-off period runs from our approval before anything can be paid:',
       BOUNTY_KINDS.map((kind) => `${BOUNTY_KIND_RULES[kind].label}: ${period(BOUNTY_KIND_RULES[kind].cooldownHours)}`),
-      'Then an administrator verifies the claim, for example against the SAPS case, what came back and what the claimant says they did. They may ask either of you for more detail, and they may contact SAPS. Money moves only under dual control: the poster confirms, CIVIC/ONE verifies, and an administrator never decides a claim on a bounty they are part of. Our administrators are named members we appoint; they are not police officers.',
+      'Then an administrator verifies the claim and releases the payment. They may ask either of you for more detail, and they may contact SAPS. Money moves only under dual control: an administrator checks every claim and releases every payment, the poster confirms or objects in between, and an administrator never decides a claim on a bounty they are part of. Our administrators are named members we appoint; they are not police officers.',
     ],
   },
   {
@@ -111,15 +111,15 @@ const SECTIONS: LegalSection[] = [
   {
     heading: 'Cancelling, expiring and refunds',
     blocks: [
-      'You can cancel a bounty from its page at any time until someone submits a claim, and the full amount is refunded. Once a claim is waiting for your answer, answer it first. If you still want to cancel after that, ask us from the bounty page and an administrator decides.',
-      `We remind you ${BOUNTY_EXPIRING_DAYS} days before a bounty ends. If it ends without a confirmed claim, it expires and the full amount is refunded. We also refund in full when we decline to list a bounty, when a bounty is cancelled, and when every claim on it has been rejected and it has closed.`,
+      'You can cancel a bounty from its page at any time until someone submits a claim, and the full amount is refunded. Once a claim is in, the bounty stays open until that claim is decided. If you still want to cancel, ask us from the bounty page and an administrator decides.',
+      `We remind you ${BOUNTY_EXPIRING_DAYS} days before a bounty ends. If it ends without a claim we approved, it expires and the full amount is refunded. We also refund in full when we decline to list a bounty, when a bounty is cancelled, and when every claim on it has been rejected and it has closed.`,
       'Refunds go back to the card you paid with. Nothing is kept as a balance on CIVIC/ONE. Your bank can take a few working days to show it.',
     ],
   },
   {
     heading: 'Disputes',
     blocks: [
-      `If the poster declines your claim, you have ${CLAIM_DISPUTE_DAYS} days to ask CIVIC/ONE for a review from the bounty page. An administrator looks at the claim, the poster’s reason and anything you add, and may confirm the claim on the poster’s behalf. If a claim of yours is rejected, you see the reason.`,
+      'If the poster objects to a claim we approved, an administrator looks at the claim, the poster’s reason and anything either of you adds, and may pay the claim anyway. If a claim of yours is rejected, you see the reason.',
       'An administrator’s decision ends the matter on CIVIC/ONE, and we release or refund the money accordingly. It doesn’t take away any right you have to go to the courts, to a consumer ombud or to SAPS. We may put a bounty on hold, and keep the money for longer, while we look into possible fraud, a report that it puts someone at risk, a payment dispute with a bank, or a request from SAPS or a court.',
     ],
   },

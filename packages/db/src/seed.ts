@@ -173,6 +173,7 @@ export async function seed(db: Database): Promise<{ users: number; posts: number
           status: c.status,
           body: c.body,
           attestedAt: createdAt,
+          approvedAt: c.status === 'PAID' ? ago(c.minutesAgo - 30) : null,
           confirmedAt: c.status === 'PAID' ? ago(c.minutesAgo - 60) : null,
           cooldownUntil: c.status === 'PAID' ? ago(c.minutesAgo - 60 * 73) : null,
           decisionReason: c.status === 'PAID' ? 'VERIFIED' : null,
@@ -201,6 +202,7 @@ export async function seed(db: Database): Promise<{ users: number; posts: number
           settledAt: paidAt,
         })
         await db.insert(bountyEvents).values([
+          { bountyId: id, claimId: claim!.id, kind: 'CLAIM_APPROVED', byAdmin: true, recipientId: userId[b.poster]!, isPublic: true, createdAt: ago(c.minutesAgo - 30) },
           { bountyId: id, claimId: claim!.id, kind: 'CLAIM_CONFIRMED', actorId: userId[b.poster]!, recipientId: userId[c.claimant]!, isPublic: true, createdAt: ago(c.minutesAgo - 60) },
           { bountyId: id, claimId: claim!.id, kind: 'CLAIM_VERIFIED', byAdmin: true, recipientId: userId[c.claimant]!, isPublic: true, createdAt: paidAt },
           { bountyId: id, claimId: claim!.id, kind: 'PAID', recipientId: userId[c.claimant]!, isPublic: true, createdAt: paidAt },

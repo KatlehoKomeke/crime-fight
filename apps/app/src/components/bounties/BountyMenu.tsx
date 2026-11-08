@@ -1,4 +1,4 @@
-import { BOUNTY_LISTED_STATUSES, BOUNTY_NOTE_MAX, BOUNTY_REPORT_LABEL, BOUNTY_REPORT_REASONS, type BountyReportReason, CLAIM_DISPUTE_DAYS, CLAIM_LIVE_STATUSES, formatZar } from '@civic/core'
+import { BOUNTY_LISTED_STATUSES, BOUNTY_NOTE_MAX, BOUNTY_REPORT_LABEL, BOUNTY_REPORT_REASONS, type BountyReportReason, CLAIM_LIVE_STATUSES, formatZar } from '@civic/core'
 import type { BountyDetailFieldsFragment } from '@civic/graphql'
 import { useState } from 'react'
 import { Modal, Platform, Pressable, Share, StyleSheet, View } from 'react-native'
@@ -10,7 +10,7 @@ import { ConfirmDialog } from '../ConfirmDialog'
 import { Icon, type IconName } from '../Icon'
 import { useToast } from '../Toast'
 import { Button, Chip, Field, IconButton, Input, Touchable, Txt } from '../ui'
-import { addDays, inFuture, NoteDialog } from './ClaimCard'
+import { NoteDialog } from './ClaimCard'
 import { usePayNow } from './StatusStrip'
 
 type Bounty = BountyDetailFieldsFragment
@@ -31,11 +31,8 @@ export async function shareBounty(bounty: Pick<Bounty, 'id' | 'amountCents' | 't
   }
 }
 
-/** Claims the API counts against cancelling: live ones, and poster rejections the claimant can still dispute. */
-const blockingClaims = (bounty: Bounty) =>
-  bounty.claims.filter(
-    (claim) => CLAIM_LIVE_STATUSES.includes(claim.status) || (claim.status === 'REJECTED_BY_POSTER' && claim.rejectedAt !== null && inFuture(addDays(claim.rejectedAt, CLAIM_DISPUTE_DAYS))),
-  ).length
+/** Claims the API counts against cancelling: the ones still being checked, which the poster can't see, and the live ones they can. */
+const blockingClaims = (bounty: Bounty) => bounty.claimsBeingChecked + bounty.claims.filter((claim) => claim.status !== 'SUBMITTED' && CLAIM_LIVE_STATUSES.includes(claim.status)).length
 
 type Dialog = 'report' | 'cancel' | 'askCancel' | 'delete' | null
 
@@ -185,7 +182,7 @@ function PosterDialogs({ bounty, dialog, onClose }: { bounty: Bounty; dialog: Di
       <NoteDialog
         open={dialog === 'askCancel'}
         title="Ask CIVIC/ONE to cancel?"
-        body="A claim is being decided, so only CIVIC/ONE can cancel this bounty now. Tell us why you want it cancelled and we’ll look at it."
+        body="A claim on this bounty is being decided, so only CIVIC/ONE can cancel it now. Tell us why you want it cancelled and we’ll look at it."
         label="Why you want to cancel"
         confirmLabel="Send request"
         loading={asking.fetching}

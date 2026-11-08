@@ -12,7 +12,6 @@ import {
   bountyExpiresAt,
   checkPrivacy,
   CLAIM_DECISION_LABEL,
-  CLAIM_DISPUTE_DAYS,
   CLAIM_LIVE_STATUSES,
   CLAIM_POSTER_RESPONSE_DAYS,
   CLAIM_TEXT_RETENTION_DAYS,
@@ -23,14 +22,14 @@ import {
   formatZar,
   MISSING_PERSON_TEXT_RETENTION_DAYS,
   normaliseCaseNumber,
-  PAYOUT_ACCOUNT_HOLD_HOURS,
   payoutAccountReadyAt,
   PENDING_PAYMENT_TTL_HOURS,
+  posterAnswerDue,
   type PrivacyFindingKind,
 } from '@civic/core'
 import { bountyNoteSchema, createBountySchema, type CreateBountyInput, payoutAccountSchema, type PayoutAccountInput, reportBountySchema, submitClaimSchema, type SubmitClaimInput } from '@civic/core/schemas'
 import { type Bounty, type BountyClaim, type BountyEvent, type Database, type LedgerEntry, type PayoutAccount, schema, type User } from '@civic/db'
-import { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne, or, type SQL, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, type SQL, sql } from 'drizzle-orm'
 import { createHmac } from 'node:crypto'
 import { z } from 'zod'
 import { apiError } from '../errors'
@@ -53,6 +52,8 @@ const { bounties, bountyClaims, ledgerEntries, paymentEvents, payoutAccounts, bo
 export interface MoneyContext {
   db: Database
   payments: Payments
+  /** Handles of the admins who review claims, so they can be told when one needs them. */
+  adminHandles?: ReadonlySet<string>
 }
 
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
@@ -103,6 +104,14 @@ async function addEvent(tx: Tx, event: EventInput): Promise<BountyEvent> {
     })
     .returning()
   return row!
+}
+
+/** Tells every admin that a bounty needs them: a claim to check, a confirmation, an objection. */
+async function notifyAdmins(tx: Tx, ctx: MoneyContext, event: { bountyId: string; claimId: string; note: string }): Promise<void> {
+  const handles = [...(ctx.adminHandles ?? [])]
+  if (!handles.length) return
+  const admins = await tx.select({ id: users.id }).from(users).where(inArray(users.handle, handles))
+  for (const admin of admins) await addEvent(tx, { ...event, kind: 'REVIEW_NEEDED', recipientId: admin.id })
 }
 
 /* Validation beyond the schemas: personal details the API refuses outright. */
@@ -497,15 +506,12 @@ async function notParty(db: Database, admin: User, bounty: Bounty, message = 'Yo
   if (bounty.posterId === admin.id || (await viewerClaim(db, bounty.id, admin.id))) throw forbidden(message)
 }
 
-/** Claims that keep a bounty alive: live ones, and poster rejections still inside the claimant's dispute window. */
-const blockingClaims = (bountyId: string) =>
-  and(
-    eq(bountyClaims.bountyId, bountyId),
-    or(inArray(bountyClaims.status, LIVE_CLAIMS), and(eq(bountyClaims.status, 'REJECTED_BY_POSTER'), gt(bountyClaims.rejectedAt, new Date(Date.now() - days(CLAIM_DISPUTE_DAYS))))),
-  )
-
+/** Claims that keep a bounty alive, from the moment one is sent until it is paid, rejected or withdrawn. */
 async function liveClaimCount(db: Database | Tx, bountyId: string): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(bountyClaims).where(blockingClaims(bountyId))
+  const [row] = await db
+    .select({ n: count() })
+    .from(bountyClaims)
+    .where(and(eq(bountyClaims.bountyId, bountyId), inArray(bountyClaims.status, LIVE_CLAIMS)))
   return row?.n ?? 0
 }
 
@@ -526,7 +532,7 @@ export async function cancelBounty(ctx: MoneyContext, poster: User, bountyId: st
   }
   if (bounty.status !== 'OPEN' && bounty.status !== 'PENDING_REVIEW') throw badInput('This bounty can’t be cancelled now.')
   if (await liveClaimCount(ctx.db, bounty.id)) {
-    throw badInput('A claim is waiting for your answer. Answer it first, or ask CIVIC/ONE to cancel the bounty for you.')
+    throw badInput('A claim on this bounty is being decided, so it can’t be cancelled now. Ask CIVIC/ONE to cancel it for you.')
   }
   const refund = await ctx.db.transaction((tx) => closeAndRefund(tx, bounty, 'CANCELLED', 'CANCELLED', 'Cancelled by the poster', poster.id))
   if (refund) await sendRefund(ctx, refund)
@@ -558,6 +564,10 @@ export async function submitClaim(ctx: MoneyContext, claimant: User, bountyId: s
   // One claim per person per bounty, ever: withdrawing and claiming again would keep a bounty from closing for as long as someone liked.
   const [earlier] = await ctx.db.select({ status: bountyClaims.status }).from(bountyClaims).where(and(eq(bountyClaims.bountyId, bounty.id), eq(bountyClaims.claimantId, claimant.id))).limit(1)
   if (earlier) throw badInput(earlier.status === 'WITHDRAWN' ? 'You withdrew your claim on this bounty, and a bounty can be claimed once.' : 'You already have a claim on this bounty.')
+  // A claim is a claim on money: it needs somewhere for the money to go. The 72-hour hold on a new account still applies at payout.
+  if (!(await activePayoutAccount(ctx.db, claimant.id))) {
+    throw badInput('Add the bank account the reward should be paid into before you claim. You can do it under Payouts in Settings.', { needsPayoutAccount: true })
+  }
   const parsed = submitClaimSchema.safeParse(raw)
   if (!parsed.success) throw badInput(parsed.error.issues[0]?.message ?? 'Invalid claim', issues(parsed.error))
   checkClaimText(bounty.kind, parsed.data.body)
@@ -574,7 +584,9 @@ export async function submitClaim(ctx: MoneyContext, claimant: User, bountyId: s
         .insert(bountyClaims)
         .values({ bountyId: bounty.id, claimantId: claimant.id, body: parsed.data.body, links: parsed.data.links.join('\n'), attestedAt: new Date() })
         .returning()
+      // The poster is told a claim came in, never by whom or what it says: that waits for CIVIC/ONE's check.
       await addEvent(tx, { bountyId: bounty.id, claimId: claim!.id, kind: 'CLAIM_SUBMITTED', actorId: claimant.id, recipientId: bounty.posterId, isPublic: true })
+      await notifyAdmins(tx, ctx, { bountyId: bounty.id, claimId: claim!.id, note: 'A new claim to check' })
       return claim!
     })
   } catch (error) {
@@ -591,81 +603,69 @@ async function claimById(db: Database, claimId: string): Promise<{ claim: Bounty
   return row
 }
 
+/** Back to taking claims once the claim it was waiting on is gone, inside the caller's transaction. */
+async function reopenFor(tx: Tx, bounty: Bounty, claimId: string): Promise<void> {
+  if (bounty.winningClaimId !== claimId) return
+  await tx.update(bounties).set({ status: 'OPEN', winningClaimId: null }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'AWAITING_VERIFICATION'), eq(bounties.winningClaimId, claimId)))
+}
+
 export async function withdrawClaim(ctx: MoneyContext, claimant: User, claimId: string): Promise<BountyClaim> {
   const { claim, bounty } = await claimById(ctx.db, claimId)
   if (claim.claimantId !== claimant.id) throw notFound('Claim')
-  if (!['SUBMITTED', 'REJECTED_BY_POSTER', 'DISPUTED'].includes(claim.status)) throw badInput('This claim can’t be withdrawn now.')
+  // Until the payout is sent; after that the money is on its way.
+  if (!['SUBMITTED', 'APPROVED', 'CONFIRMED', 'DISPUTED'].includes(claim.status)) throw badInput('This claim can’t be withdrawn now.')
   return ctx.db.transaction(async (tx) => {
     const [updated] = await tx.update(bountyClaims).set({ status: 'WITHDRAWN' }).where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, claim.status))).returning()
+    if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
+    await reopenFor(tx, bounty, claim.id)
     await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_WITHDRAWN', actorId: claimant.id, recipientId: bounty.posterId })
-    return updated!
+    return updated
   })
 }
 
-/** The poster says the outcome happened. The bounty stops taking claims; an admin decides after the cooling-off. */
+/** An approved claim the poster is answering: theirs, still waiting, on a bounty still waiting on it. */
+async function approvedClaimFor(ctx: MoneyContext, poster: User, claimId: string): Promise<{ claim: BountyClaim; bounty: Bounty }> {
+  const found = await claimById(ctx.db, claimId)
+  // A poster can't see a claim before CIVIC/ONE approved it, so they can't answer one either.
+  if (found.bounty.posterId !== poster.id || !found.claim.approvedAt) throw notFound('Claim')
+  if (found.claim.status !== 'APPROVED') throw badInput('This claim has already been answered.')
+  if (found.bounty.status !== 'AWAITING_VERIFICATION' || found.bounty.winningClaimId !== found.claim.id) throw badInput('This bounty isn’t taking an answer right now.')
+  return found
+}
+
+/** The poster says the outcome happened. CIVIC/ONE pays once the cooling-off period ends. */
 export async function confirmClaim(ctx: MoneyContext, poster: User, claimId: string, rawNote: string | null | undefined): Promise<BountyClaim> {
-  const { claim, bounty } = await claimById(ctx.db, claimId)
-  if (bounty.posterId !== poster.id) throw notFound('Claim')
-  if (bounty.status !== 'OPEN') throw badInput('This bounty isn’t taking decisions right now.')
-  if (claim.status !== 'SUBMITTED' && claim.status !== 'DISPUTED') throw badInput('This claim has already been answered.')
+  const { claim, bounty } = await approvedClaimFor(ctx, poster, claimId)
   const note = rawNote ? bountyNoteSchema.parse(rawNote) : null
-  const now = new Date()
-  try {
-    return await ctx.db.transaction(async (tx) => {
-      const [updatedBounty] = await tx
-        .update(bounties)
-        .set({ status: 'AWAITING_VERIFICATION', winningClaimId: claim.id })
-        .where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'OPEN')))
-        .returning()
-      if (!updatedBounty) throw badInput('This bounty changed while you were looking at it. Reload and try again.')
-      const [updated] = await tx
-        .update(bountyClaims)
-        .set({ status: 'CONFIRMED', confirmNote: note, confirmedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind) })
-        .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, claim.status)))
-        .returning()
-      // Withdrawn a moment ago: the whole confirmation rolls back rather than pointing the bounty at a dead claim.
-      if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
-      await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_CONFIRMED', actorId: poster.id, recipientId: claim.claimantId, isPublic: true })
-      return updated
-    })
-  } catch (error) {
-    if (violates(error, 'bounty_claims_one_winner_idx')) throw badInput('Another claim on this bounty is already confirmed.')
-    throw error
-  }
-}
-
-export async function rejectClaim(ctx: MoneyContext, poster: User, claimId: string, rawNote: string): Promise<BountyClaim> {
-  const { claim, bounty } = await claimById(ctx.db, claimId)
-  if (bounty.posterId !== poster.id) throw notFound('Claim')
-  if (claim.status !== 'SUBMITTED') throw badInput('This claim has already been answered.')
-  const note = bountyNoteSchema.parse(rawNote)
   return ctx.db.transaction(async (tx) => {
     const [updated] = await tx
       .update(bountyClaims)
-      .set({ status: 'REJECTED_BY_POSTER', posterNote: note, rejectedAt: new Date() })
-      .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'SUBMITTED')))
+      .set({ status: 'CONFIRMED', confirmNote: note, confirmedAt: new Date() })
+      .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'APPROVED')))
       .returning()
-    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_REJECTED_BY_POSTER', actorId: poster.id, recipientId: claim.claimantId, note })
-    return updated!
+    // Withdrawn a moment ago.
+    if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
+    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_CONFIRMED', actorId: poster.id, recipientId: claim.claimantId, isPublic: true })
+    await notifyAdmins(tx, ctx, { bountyId: bounty.id, claimId: claim.id, note: 'The poster confirmed. Pay once the cooling-off period ends.' })
+    return updated
   })
 }
 
-/** The claimant disagrees with a rejection: CIVIC/ONE decides, and may pay over the poster's head. */
-export async function disputeClaim(ctx: MoneyContext, claimant: User, claimId: string, rawNote: string): Promise<BountyClaim> {
-  const { claim, bounty } = await claimById(ctx.db, claimId)
-  if (claim.claimantId !== claimant.id) throw notFound('Claim')
-  if (claim.status !== 'REJECTED_BY_POSTER') throw badInput('Only a rejected claim can be disputed.')
-  if (claim.rejectedAt && claim.rejectedAt.getTime() + days(CLAIM_DISPUTE_DAYS) < Date.now()) throw badInput(`A rejection can be disputed within ${CLAIM_DISPUTE_DAYS} days.`)
+/** The poster says the outcome didn't happen, with a reason for the reviewer. CIVIC/ONE decides, and may pay anyway. */
+export async function objectToClaim(ctx: MoneyContext, poster: User, claimId: string, rawNote: string): Promise<BountyClaim> {
+  const { claim, bounty } = await approvedClaimFor(ctx, poster, claimId)
   const note = bountyNoteSchema.parse(rawNote)
-  const now = new Date()
   return ctx.db.transaction(async (tx) => {
     const [updated] = await tx
       .update(bountyClaims)
-      .set({ status: 'DISPUTED', disputeNote: note, disputedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind) })
-      .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'REJECTED_BY_POSTER')))
+      .set({ status: 'DISPUTED', posterNote: note, disputedAt: new Date() })
+      .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'APPROVED')))
       .returning()
-    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_DISPUTED', actorId: claimant.id, recipientId: bounty.posterId, note })
-    return updated!
+    if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
+    // The claimant hears that the poster objected; the reason is for the reviewer.
+    await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_DISPUTED', actorId: poster.id, recipientId: claim.claimantId, isPublic: true })
+    await notifyAdmins(tx, ctx, { bountyId: bounty.id, claimId: claim.id, note: `The poster objected: ${note}` })
+    return updated
   })
 }
 
@@ -712,24 +712,32 @@ export async function releasePreflight(db: Database, bounty: Bounty, claim: Boun
   }
 }
 
+/**
+ * What CIVIC/ONE does with a claim, in order: APPROVE a new one after checking
+ * it (the poster then sees it and confirms or objects), VERIFY one the poster
+ * confirmed, didn't answer in time or objected to (that last is an override),
+ * which sends the payout once the cooling-off period ends; or REJECT, at any
+ * point before the payout.
+ */
 export async function decideClaim(
   ctx: MoneyContext,
   admin: User,
   claimId: string,
-  decision: 'VERIFY' | 'REJECT',
+  decision: 'APPROVE' | 'VERIFY' | 'REJECT',
   reason: ClaimDecisionReason,
   rawNote: string,
 ): Promise<BountyClaim> {
   const { claim, bounty } = await claimById(ctx.db, claimId)
   if (claim.claimantId === admin.id) throw forbidden('You can’t decide a claim on a bounty you’re part of.')
   await notParty(ctx.db, admin, bounty, 'You can’t decide a claim on a bounty you’re part of.')
-  if (claim.status !== 'CONFIRMED' && claim.status !== 'DISPUTED') throw badInput('This claim isn’t waiting for a decision.')
   if (bounty.status !== 'AWAITING_VERIFICATION' && bounty.status !== 'OPEN') throw badInput('This bounty isn’t taking decisions right now.')
-  if (bounty.winningClaimId && bounty.winningClaimId !== claim.id) throw badInput('The poster confirmed another claim on this bounty. Decide that one first.')
   const note = bountyNoteSchema.parse(rawNote)
   const now = new Date()
 
+  if (decision === 'APPROVE') return approveClaim(ctx, admin, claim, bounty, note, now)
+
   if (decision === 'REJECT') {
+    if (!['SUBMITTED', 'APPROVED', 'CONFIRMED', 'DISPUTED'].includes(claim.status)) throw badInput('This claim isn’t waiting for a decision.')
     if (reason === 'VERIFIED' || reason === 'ADMIN_OVERRIDE') throw badInput('Choose a reason for rejecting.')
     const { rejected, refund } = await ctx.db.transaction(async (tx) => {
       const [decided] = await tx
@@ -741,14 +749,16 @@ export async function decideClaim(
       let queued: LedgerEntry | null = null
       if (bounty.winningClaimId === claim.id) {
         // Back to taking claims. If its time ran out while this one was under review it expires now, unless other claims
-        // are still being answered: then it reopens and the sweep expires it once they are, as with any open bounty.
+        // are still being decided: then it reopens and the sweep expires it once they are, as with any open bounty.
         const outOfTime = bounty.expiresAt !== null && bounty.expiresAt < now
         if (outOfTime && !(await liveClaimCount(tx, bounty.id))) {
           queued = await closeAndRefund(tx, { ...bounty, status: 'AWAITING_VERIFICATION' }, 'EXPIRED', 'EXPIRED', 'The bounty expired', null, true)
         } else {
-          await tx.update(bounties).set({ status: 'OPEN', winningClaimId: null }).where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'AWAITING_VERIFICATION')))
+          await reopenFor(tx, bounty, claim.id)
         }
-        // The poster hears the decision with its public reason; the admin's note goes to the claimant.
+      }
+      // The poster only hears about claims they were shown, and gets the public reason; the admin's note goes to the claimant.
+      if (claim.approvedAt) {
         await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_REJECTED', actorId: admin.id, byAdmin: true, recipientId: bounty.posterId, note: CLAIM_DECISION_LABEL[reason] })
       }
       await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_REJECTED', actorId: admin.id, byAdmin: true, recipientId: claim.claimantId, note })
@@ -758,7 +768,16 @@ export async function decideClaim(
     return rejected
   }
 
-  if (claim.status === 'DISPUTED' && reason !== 'ADMIN_OVERRIDE') throw badInput('Paying a claim the poster rejected is an override; record it as one.')
+  // VERIFY: the claim the bounty is waiting on, once the poster has answered or had their chance to.
+  if (bounty.status !== 'AWAITING_VERIFICATION' || bounty.winningClaimId !== claim.id) throw badInput('This claim isn’t waiting to be paid.')
+  const unanswered = claim.status === 'APPROVED' && claim.approvedAt !== null && posterAnswerDue(claim.approvedAt) < now
+  if (claim.status === 'APPROVED' && !unanswered) {
+    const due = claim.approvedAt ? posterAnswerDue(claim.approvedAt) : now
+    throw badInput(`The poster has until ${due.toISOString()} to confirm or object. Pay after they answer, or after that.`, { answerDue: due.toISOString() })
+  }
+  if (!['APPROVED', 'CONFIRMED', 'DISPUTED'].includes(claim.status)) throw badInput('This claim isn’t waiting to be paid.')
+  if (claim.status === 'DISPUTED' && reason !== 'ADMIN_OVERRIDE') throw badInput('Paying a claim the poster objected to is an override; record it as one.')
+  if (claim.status !== 'DISPUTED' && reason === 'ADMIN_OVERRIDE') throw badInput('The poster didn’t object to this claim; record it as verified.')
   if (claim.cooldownUntil && claim.cooldownUntil > now) {
     throw badInput(`The cooling-off period ends ${claim.cooldownUntil.toISOString()}. Verify after that.`, { cooldownUntil: claim.cooldownUntil.toISOString() })
   }
@@ -774,8 +793,8 @@ export async function decideClaim(
     released = await ctx.db.transaction(async (tx) => {
       const [updatedBounty] = await tx
         .update(bounties)
-        .set({ status: 'RELEASING', winningClaimId: claim.id })
-        .where(and(eq(bounties.id, bounty.id), inArray(bounties.status, ['AWAITING_VERIFICATION', 'OPEN'])))
+        .set({ status: 'RELEASING' })
+        .where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'AWAITING_VERIFICATION'), eq(bounties.winningClaimId, claim.id)))
         .returning()
       if (!updatedBounty) throw badInput('This bounty changed while you were looking at it. Reload and try again.')
       const [updated] = await tx
@@ -785,15 +804,47 @@ export async function decideClaim(
         .returning()
       if (!updated) throw badInput('This claim changed while you were looking at it. Reload and try again.')
       const release = await queueRelease(tx, updatedBounty, updated, account)
+      if (unanswered) {
+        await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_ESCALATED', recipientId: bounty.posterId, isPublic: true, note: `The poster didn’t answer within ${CLAIM_POSTER_RESPONSE_DAYS} days, which counts as no objection` })
+      }
       await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_VERIFIED', actorId: admin.id, byAdmin: true, recipientId: claim.claimantId, isPublic: true, note })
       return release
     })
   } catch (error) {
-    if (violates(error, 'bounty_claims_one_winner_idx')) throw badInput('Another claim on this bounty is already confirmed or paid.')
+    if (violates(error, 'bounty_claims_one_winner_idx')) throw badInput('Another claim on this bounty is already approved or paid.')
     throw error
   }
   await sendTransfer(ctx, released)
   return (await claimById(ctx.db, claim.id)).claim
+}
+
+/** CIVIC/ONE checked a new claim and it holds up: the poster now sees it, and the cooling-off period starts. */
+async function approveClaim(ctx: MoneyContext, admin: User, claim: BountyClaim, bounty: Bounty, note: string, now: Date): Promise<BountyClaim> {
+  if (claim.status !== 'SUBMITTED') throw badInput('This claim has already been checked.')
+  if (bounty.status !== 'OPEN' || bounty.winningClaimId) throw badInput('Another claim on this bounty is already approved. Decide that one first.')
+  try {
+    return await ctx.db.transaction(async (tx) => {
+      const [waiting] = await tx
+        .update(bounties)
+        .set({ status: 'AWAITING_VERIFICATION', winningClaimId: claim.id })
+        .where(and(eq(bounties.id, bounty.id), eq(bounties.status, 'OPEN'), isNull(bounties.winningClaimId)))
+        .returning()
+      if (!waiting) throw badInput('This bounty changed while you were looking at it. Reload and try again.')
+      const [approved] = await tx
+        .update(bountyClaims)
+        .set({ status: 'APPROVED', approvedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind) })
+        .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'SUBMITTED')))
+        .returning()
+      // Withdrawn a moment ago: the bounty goes back to how it was.
+      if (!approved) throw badInput('This claim changed while you were looking at it. Reload and try again.')
+      await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_APPROVED', actorId: admin.id, byAdmin: true, recipientId: bounty.posterId, isPublic: true, note })
+      await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_APPROVED', actorId: admin.id, byAdmin: true, recipientId: claim.claimantId, note })
+      return approved
+    })
+  } catch (error) {
+    if (violates(error, 'bounty_claims_one_winner_idx')) throw badInput('Another claim on this bounty is already approved. Decide that one first.')
+    throw error
+  }
 }
 
 async function queueRelease(tx: Tx, bounty: Bounty, claim: BountyClaim, account: PayoutAccount): Promise<LedgerEntry> {
@@ -873,7 +924,10 @@ export async function applyTransfer(ctx: MoneyContext, reference: string, status
         .returning()
       if (!paid) return
       if (entry.claimId) await tx.update(bountyClaims).set({ status: 'PAID' }).where(eq(bountyClaims.id, entry.claimId))
-      const others = await tx.select().from(bountyClaims).where(and(eq(bountyClaims.bountyId, bounty.id), inArray(bountyClaims.status, ['SUBMITTED', 'REJECTED_BY_POSTER', 'DISPUTED'])))
+      const others = await tx
+        .select()
+        .from(bountyClaims)
+        .where(and(eq(bountyClaims.bountyId, bounty.id), inArray(bountyClaims.status, ['SUBMITTED', 'APPROVED', 'CONFIRMED', 'DISPUTED']), entry.claimId ? ne(bountyClaims.id, entry.claimId) : undefined))
       for (const other of others) {
         await tx.update(bountyClaims).set({ status: 'REJECTED', decisionReason: 'OTHER_CLAIM_PAID', decidedAt: new Date() }).where(eq(bountyClaims.id, other.id))
         await addEvent(tx, { bountyId: bounty.id, claimId: other.id, kind: 'CLAIM_REJECTED', recipientId: other.claimantId, note: 'Another claim was paid' })
@@ -1346,23 +1400,27 @@ export async function sweep(ctx: MoneyContext): Promise<SweepReport> {
     }
   })
 
-  // Claims the poster hasn't answered go to an admin.
+  // An approved claim the poster didn't answer in time: silence counts as no objection, and it waits for CIVIC/ONE to pay.
   await step('escalate', async () => {
     const silent = await ctx.db
       .select({ claim: bountyClaims, bounty: bounties })
       .from(bountyClaims)
       .innerJoin(bounties, eq(bounties.id, bountyClaims.bountyId))
-      .where(and(eq(bountyClaims.status, 'SUBMITTED'), eq(bounties.status, 'OPEN'), lt(bountyClaims.createdAt, new Date(now.getTime() - days(CLAIM_POSTER_RESPONSE_DAYS)))))
+      .where(and(eq(bountyClaims.status, 'APPROVED'), eq(bounties.status, 'AWAITING_VERIFICATION'), lt(bountyClaims.approvedAt, new Date(now.getTime() - days(CLAIM_POSTER_RESPONSE_DAYS)))))
     for (const { claim, bounty } of silent) {
       await ctx.db.transaction(async (tx) => {
         const [updated] = await tx
           .update(bountyClaims)
-          .set({ status: 'DISPUTED', disputedAt: now, cooldownUntil: claimCooldownEnds(now, bounty.kind), disputeNote: `The poster didn’t answer within ${CLAIM_POSTER_RESPONSE_DAYS} days` })
-          .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'SUBMITTED')))
+          .set({ status: 'CONFIRMED', confirmedAt: now })
+          .where(and(eq(bountyClaims.id, claim.id), eq(bountyClaims.status, 'APPROVED')))
           .returning()
-        if (updated) await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_ESCALATED', recipientId: claim.claimantId, note: 'The poster didn’t answer, so CIVIC/ONE will decide' })
+        if (!updated) return
+        const note = `The poster didn’t answer within ${CLAIM_POSTER_RESPONSE_DAYS} days, which counts as no objection`
+        await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_ESCALATED', recipientId: claim.claimantId, isPublic: true, note })
+        await addEvent(tx, { bountyId: bounty.id, claimId: claim.id, kind: 'CLAIM_ESCALATED', recipientId: bounty.posterId, note })
+        await notifyAdmins(tx, ctx, { bountyId: bounty.id, claimId: claim.id, note: `${note}. Pay once the cooling-off period ends.` })
+        report.escalated++
       })
-      report.escalated++
     }
   })
 
@@ -1483,7 +1541,8 @@ export async function pageMyClaims(db: Database, claimantId: string, args: PageA
  * a payment that didn't match).
  */
 export function pageAdminQueue(db: Database, args: PageArgs) {
-  const disputed = db.select({ id: bountyClaims.bountyId }).from(bountyClaims).where(eq(bountyClaims.status, 'DISPUTED'))
+  // A new claim to check, or an objection to decide.
+  const disputed = db.select({ id: bountyClaims.bountyId }).from(bountyClaims).where(inArray(bountyClaims.status, ['SUBMITTED', 'DISPUTED']))
   const reported = db.select({ id: bountyReports.bountyId }).from(bountyReports)
   const failedPayout = db.select({ id: ledgerEntries.bountyId }).from(ledgerEntries).where(and(eq(ledgerEntries.type, 'RELEASE'), eq(ledgerEntries.status, 'FAILED')))
   const failedRefund = db.select({ id: ledgerEntries.bountyId }).from(ledgerEntries).where(and(eq(ledgerEntries.type, 'REFUND'), eq(ledgerEntries.status, 'FAILED')))
@@ -1510,13 +1569,29 @@ export function pageAdminQueue(db: Database, args: PageArgs) {
   )
 }
 
-/** A bounty's claims, oldest first. Withdrawn ones are kept for admins only: the claimant was told the poster won't see them. */
-export const claimsFor = (db: Database, bountyId: string, withdrawn = false) =>
+/**
+ * A bounty's claims, oldest first: every one for admins; for the poster only
+ * those CIVIC/ONE has approved and the claimant hasn't withdrawn (the claimant
+ * was told the poster won't see a withdrawn claim).
+ */
+export const claimsFor = (db: Database, bountyId: string, viewer: 'admin' | 'poster') =>
   db
     .select()
     .from(bountyClaims)
-    .where(and(eq(bountyClaims.bountyId, bountyId), withdrawn ? undefined : ne(bountyClaims.status, 'WITHDRAWN')))
+    .where(and(eq(bountyClaims.bountyId, bountyId), viewer === 'admin' ? undefined : and(ne(bountyClaims.status, 'WITHDRAWN'), isNotNull(bountyClaims.approvedAt))))
     .orderBy(asc(bountyClaims.createdAt))
+
+/** Claims CIVIC/ONE is still checking, which the poster can't see yet. */
+export async function claimsBeingChecked(db: Database, bountyId: string): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(bountyClaims).where(and(eq(bountyClaims.bountyId, bountyId), eq(bountyClaims.status, 'SUBMITTED')))
+  return row?.n ?? 0
+}
+
+/** Which of a bounty's claims CIVIC/ONE has approved: the ones the poster may know about. */
+export async function approvedClaimIds(db: Database, bountyId: string): Promise<Set<string>> {
+  const rows = await db.select({ id: bountyClaims.id }).from(bountyClaims).where(and(eq(bountyClaims.bountyId, bountyId), isNotNull(bountyClaims.approvedAt)))
+  return new Set(rows.map((row) => row.id))
+}
 
 export async function viewerClaim(db: Database, bountyId: string, viewerId: string): Promise<BountyClaim | null> {
   const [row] = await db
@@ -1564,7 +1639,7 @@ export async function heldForUser(db: Database, userId: string): Promise<string[
   const claimed = db
     .select({ id: bountyClaims.bountyId })
     .from(bountyClaims)
-    .where(and(eq(bountyClaims.claimantId, userId), inArray(bountyClaims.status, ['CONFIRMED', 'DISPUTED', 'VERIFIED'])))
+    .where(and(eq(bountyClaims.claimantId, userId), inArray(bountyClaims.status, ['APPROVED', 'CONFIRMED', 'DISPUTED', 'VERIFIED'])))
   // A deposit nobody paid for doesn't hold money; deletion abandons it.
   const pending = db.select({ id: ledgerEntries.bountyId }).from(ledgerEntries).where(and(eq(ledgerEntries.userId, userId), eq(ledgerEntries.status, 'PENDING'), ne(ledgerEntries.type, 'DEPOSIT')))
   const rows = await db
@@ -1574,5 +1649,4 @@ export async function heldForUser(db: Database, userId: string): Promise<string[
   return rows.map((row) => row.id)
 }
 
-export const CLAIM_POSTER_RESPONSE = { days: CLAIM_POSTER_RESPONSE_DAYS, holdHours: PAYOUT_ACCOUNT_HOLD_HOURS, kinds: BOUNTY_KIND_RULES }
 export type { ClaimStatus }

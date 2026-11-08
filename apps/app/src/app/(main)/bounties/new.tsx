@@ -48,7 +48,8 @@ const RELATIONSHIPS: Array<{ value: Relationship; label: string }> = [
 
 const BEFORE_YOU_PAY = [
   'You can cancel while nobody has sent a claim, and the full amount is refunded.',
-  'Payment is released only after you confirm a claim, a waiting period passes, and CIVIC/ONE verifies it.',
+  'CIVIC/ONE checks every claim before you see it. You then confirm it or object, and CIVIC/ONE has the final say.',
+  'Payment is released only after a waiting period, once you’ve answered or had the chance to.',
   'Refunds go back to the card you paid with, usually within a few working days.',
 ]
 
@@ -355,8 +356,8 @@ function BountyForm({ sandbox }: { sandbox: boolean }) {
             <View style={styles.noticeRow}>
               <Icon name="bounty" size={15} color={c.text} />
               <Txt variant="small" style={{ flex: 1 }}>
-                You pay {amount} now. CIVIC/ONE holds it. It’s paid to the person who honours the bounty once you confirm and we verify, or refunded to you if the
-                bounty expires or you cancel it. No CIVIC/ONE fee.
+                You pay {amount} now. CIVIC/ONE holds it. It’s paid to the person who honours the bounty once we’ve checked their claim and you’ve confirmed it or had the chance
+                to object, or refunded to you if the bounty expires or you cancel it. No CIVIC/ONE fee.
               </Txt>
             </View>
           </View>
@@ -378,7 +379,7 @@ function BountyForm({ sandbox }: { sandbox: boolean }) {
           <Checkbox
             checked={terms}
             onChange={setTerms}
-            label="I’m the owner or victim, or immediate family. This is reported to SAPS. CIVIC/ONE will hold my payment and pay it only to a claim I confirm and CIVIC/ONE verifies, or refund me. I’ve read the bounty rules and the terms."
+            label="I’m the owner or victim, or immediate family. This is reported to SAPS. CIVIC/ONE will hold my payment and pay it only to a claim CIVIC/ONE checks and verifies after I’ve confirmed it or had the chance to object, or refund me. I’ve read the bounty rules and the terms."
           />
           <Txt variant="small" color="textMuted" style={styles.links}>
             <Link href="/bounties/rules" style={linkStyle}>

@@ -66,7 +66,7 @@ function Activity({ notification, kind, post }: { notification: NotificationNode
 }
 
 /**
- * Something happened to a bounty you posted or claimed. Actions by CIVIC/ONE
+ * Something happened to a bounty you posted, claimed or review. Actions by CIVIC/ONE
  * itself (the sweep, an administrator) carry no actor and show the shield mark;
  * an administrator's handle is never exposed.
  */

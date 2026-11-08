@@ -31,11 +31,15 @@ function queueReasons(bounty: QueueBounty): string[] {
   if (bounty.status === 'FROZEN') reasons.push('On hold')
   for (const claim of bounty.claims) {
     const who = claim.claimant ? `@${claim.claimant.handle}` : 'a former member'
-    if (claim.status === 'CONFIRMED') {
-      const cooldown = claim.cooldownUntil ? ` · cooling-off ends ${formatDateTime(claim.cooldownUntil)}` : ''
-      reasons.push(`Confirmed ${formatRelativeTime(claim.confirmedAt ?? claim.createdAt)}${cooldown} · ${who}`)
+    const cooldown = claim.cooldownUntil ? ` · cooling-off ends ${formatDateTime(claim.cooldownUntil)}` : ''
+    if (claim.status === 'SUBMITTED') {
+      reasons.push(`New claim from ${who} · check it`)
+    } else if (claim.status === 'APPROVED') {
+      reasons.push(`Approved · the poster answers by ${claim.posterAnswerDue ? formatDateTime(claim.posterAnswerDue) : 'the deadline'}${cooldown} · ${who}`)
+    } else if (claim.status === 'CONFIRMED') {
+      reasons.push(`Confirmed ${formatRelativeTime(claim.confirmedAt ?? claim.createdAt)}${cooldown} · pay ${who}`)
     } else if (claim.status === 'DISPUTED') {
-      reasons.push(`Dispute from ${who} · with CIVIC/ONE to decide`)
+      reasons.push(`The poster objected to ${who}’s claim · decide`)
     } else if (claim.status === 'VERIFIED') {
       reasons.push(`Verified · paying ${who}`)
     }
@@ -111,7 +115,7 @@ export default function ReviewScreen() {
         )}
         onEndReached={queue.loadMore}
         onRefresh={queue.refresh}
-        empty={<EmptyState icon="shield" title="Nothing to review" body="Confirmed claims, disputes, missing-person bounties, failed payouts and reports land here." />}
+        empty={<EmptyState icon="shield" title="Nothing to review" body="New claims, confirmed claims, objections, missing-person bounties, failed payouts and reports land here." />}
       />
     )
   }
@@ -122,7 +126,7 @@ export default function ReviewScreen() {
       header={
         <PageHeader
           title="Review"
-          subtitle="Dual control: the poster confirms, you verify."
+          subtitle="Dual control: you check each claim, the poster confirms, you pay."
           right={admin ? <Button size="sm" tone="outline" label="Run sweep" loading={sweeping} onPress={() => setConfirmSweep(true)} /> : undefined}
         />
       }

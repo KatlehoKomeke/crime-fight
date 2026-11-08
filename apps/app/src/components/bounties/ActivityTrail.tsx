@@ -12,6 +12,7 @@ function eventTone(kind: BountyEventKind): StatusTone {
   switch (kind) {
     case 'FUNDED':
     case 'APPROVED':
+    case 'CLAIM_APPROVED':
     case 'CLAIM_VERIFIED':
     case 'PAYOUT_SENT':
     case 'PAID':
@@ -19,7 +20,6 @@ function eventTone(kind: BountyEventKind): StatusTone {
       return 'done'
     case 'DECLINED':
     case 'CLAIM_REJECTED':
-    case 'CLAIM_REJECTED_BY_POSTER':
     case 'PAYOUT_FAILED':
     case 'REFUND_FAILED':
     case 'FROZEN':
@@ -32,6 +32,7 @@ function eventTone(kind: BountyEventKind): StatusTone {
     case 'CLAIM_ESCALATED':
     case 'CANCEL_REQUESTED':
     case 'EXPIRING':
+    case 'REVIEW_NEEDED':
       return 'busy'
     default:
       return 'muted'
@@ -40,8 +41,9 @@ function eventTone(kind: BountyEventKind): StatusTone {
 
 /**
  * What happened to the bounty, oldest first. The API names a claim event's
- * actor only to the parties (claimant, poster, admins); to everyone else a
- * claim came from "a member". Admin and system events carry no actor at all.
+ * actor only to the claimant, to admins, and to the poster once CIVIC/ONE has
+ * approved the claim; to everyone else a claim came from "a member". Admin and
+ * system events carry no actor at all.
  */
 export function ActivityTrail({ events }: { events: Event[] }) {
   const c = useColors()

@@ -1,4 +1,4 @@
-import { BOUNTY_KIND_RULES, CLAIM_BODY_MAX, CLAIM_BODY_MIN, CLAIM_LINKS_MAX, CLAIM_LIVE_STATUSES, checkPrivacy, formatZar } from '@civic/core'
+import { BOUNTY_KIND_RULES, CLAIM_BODY_MAX, CLAIM_BODY_MIN, CLAIM_LINKS_MAX, CLAIM_POSTER_RESPONSE_DAYS, checkPrivacy, formatZar, PAYOUT_ACCOUNT_HOLD_HOURS } from '@civic/core'
 import type { BountyDetailFieldsFragment } from '@civic/graphql'
 import { Link, useLocalSearchParams, useRouter } from 'expo-router'
 import type { ImmutableRequest } from 'expo-router/server'
@@ -9,7 +9,7 @@ import { Icon } from '@/components/Icon'
 import { PageHeader, Screen } from '@/components/Screen'
 import { useToast } from '@/components/Toast'
 import { Button, Checkbox, EmptyState, Field, Input, Section, Skeleton, Txt } from '@/components/ui'
-import { BountyQuery, SubmitClaim } from '@/graphql/documents'
+import { BountyQuery, PayoutSettingsQuery, SubmitClaim } from '@/graphql/documents'
 import { apiIssues, apiMessage } from '@/lib/api-errors'
 import { useAuth } from '@/lib/auth'
 import { useSchemas } from '@/lib/schemas'
@@ -26,6 +26,8 @@ export default function ClaimScreen() {
   const { status } = useAuth()
   const id = param(useLocalSearchParams<{ id: string }>().id)
   const [{ data, fetching, error }] = useQuery({ query: BountyQuery, variables: bountyVariables(id), pause: status !== 'signed-in' })
+  // A claim needs somewhere for the money to go: the API refuses one without a bank account, so the form asks first.
+  const [payout] = useQuery({ query: PayoutSettingsQuery, pause: status !== 'signed-in' })
   const bounty = data?.bounty
   const Body = Platform.OS === 'web' ? View : ScrollView
   const back = <Button label="Back to the bounty" tone="outline" onPress={() => router.replace(`/bounties/${id}`)} />
@@ -37,7 +39,7 @@ export default function ClaimScreen() {
         <EmptyState
           icon="lock"
           title="Sign in to claim a bounty"
-          body="Claims are private to the poster and CIVIC/ONE’s reviewers, and the reward is paid to the account that sends one."
+          body="CIVIC/ONE’s reviewers check every claim before the poster sees it, and the reward is paid to the bank account of the person who sends it."
           action={<Button label="Sign in" onPress={() => router.push('/sign-in')} />}
         />
       )
@@ -60,13 +62,24 @@ export default function ClaimScreen() {
     if (bounty.status !== 'OPEN' || bounty.isExpired) {
       return <EmptyState icon="bounty" title="This bounty isn’t taking claims" body="It’s under review, or it has closed." action={back} />
     }
-    if (bounty.viewerClaim && CLAIM_LIVE_STATUSES.includes(bounty.viewerClaim.status)) {
+    if (bounty.viewerClaim) {
       return (
         <EmptyState
           icon="bounty"
-          title="You already have a claim on this bounty"
-          body="One claim per person. You can follow it, or withdraw it, from the bounty."
+          title="You’ve already claimed this bounty"
+          body="A bounty can be claimed once per person. You can follow your claim from the bounty."
           action={<Button label="See your claim" onPress={() => router.replace(`/bounties/${id}`)} />}
+        />
+      )
+    }
+    if (!payout.data && payout.fetching) return <LoadingRows />
+    if (payout.data && !payout.data.viewer?.payoutAccount) {
+      return (
+        <EmptyState
+          icon="bounty"
+          title="Add your bank account first"
+          body={`The reward is paid into a South African bank account in your own name, so you need one before you claim. A new account can be paid ${PAYOUT_ACCOUNT_HOLD_HOURS} hours after you add it, which is shorter than the time a claim takes to decide.`}
+          action={<Button label="Add a bank account" icon="settings" onPress={() => router.push('/settings')} />}
         />
       )
     }
@@ -126,7 +139,7 @@ function ClaimForm({ bounty }: { bounty: BountyDetailFieldsFragment }) {
       setServerIssues(apiIssues(result.error))
       return
     }
-    toast('Your claim is with the poster')
+    toast('Your claim is with CIVIC/ONE to check')
     router.replace(`/bounties/${bounty.id}`)
   }
 
@@ -138,7 +151,7 @@ function ClaimForm({ bounty }: { bounty: BountyDetailFieldsFragment }) {
     <View>
       <View style={styles.intro}>
         <Txt variant="small" color="textMuted">
-          Only the poster and CIVIC/ONE’s reviewers see your claim. Say what you did, when, and what you handed to SAPS and where. Don’t include anyone’s ID
+          CIVIC/ONE’s reviewers check your claim first; the poster sees it, and who sent it, only once we approve it. Say what you did, when, and what you handed to SAPS and where. Don’t include anyone’s ID
           number, phone number or address, and don’t name people you suspect.
         </Txt>
         <View style={[styles.findings, { backgroundColor: c.surfaceAlt }]}>
@@ -224,11 +237,11 @@ function ClaimForm({ bounty }: { bounty: BountyDetailFieldsFragment }) {
           />
 
           <Txt variant="small" color="textMuted">
-            If your claim is verified, the reward is paid to the bank account in Settings after a waiting period of {cooldownDays} days. Add one in{' '}
+            If we approve your claim, a waiting period of {cooldownDays} days starts and the poster has {CLAIM_POSTER_RESPONSE_DAYS} days to confirm it or object. Then the reward is paid to the bank account in{' '}
             <Link href="/settings" style={linkStyle}>
               Settings
-            </Link>{' '}
-            if you haven’t.
+            </Link>
+            .
           </Txt>
 
           <View style={styles.submit}>

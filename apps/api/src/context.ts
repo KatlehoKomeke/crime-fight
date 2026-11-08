@@ -18,6 +18,8 @@ export interface Context {
   /** Admins review bounties and release money. Configured by handle (ADMIN_HANDLES), never a public role. */
   isAdmin: () => Promise<boolean>
   requireAdmin: () => Promise<User>
+  /** Who the admins are, so the money layer can tell them when a claim needs them. */
+  adminHandles: ReadonlySet<string>
   loaders: Loaders
   realtime: Publisher
   payments: Payments
@@ -59,6 +61,7 @@ function buildContext(services: Services, identity: Identity | null, resolve: ()
     requireViewer,
     isAdmin,
     requireAdmin,
+    adminHandles: services.adminHandles,
     loaders: createLoaders(services.db, async () => (await viewer())?.id ?? null),
     realtime: services.realtime,
     payments: services.payments,

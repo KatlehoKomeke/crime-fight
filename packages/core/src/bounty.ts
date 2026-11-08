@@ -14,7 +14,7 @@ export const BOUNTY_STATUSES = [
   'PENDING_REVIEW',
   /** Listed and taking claims. */
   'OPEN',
-  /** The poster confirmed a claim; an admin verifies it after the cooling-off period. New claims pause. */
+  /** CIVIC/ONE approved a claim: the poster confirms or objects, then CIVIC/ONE pays after the cooling-off period. New claims pause. */
   'AWAITING_VERIFICATION',
   /** Verified; the payout has been sent to the claimant's bank and hasn't settled yet. */
   'RELEASING',
@@ -38,25 +38,33 @@ export const BOUNTY_LISTED_STATUSES: readonly BountyStatus[] = ['OPEN', 'AWAITIN
 /** Nothing changes after these. */
 export const BOUNTY_CLOSED_STATUSES: readonly BountyStatus[] = ['PAID', 'CANCELLED', 'EXPIRED', 'ABANDONED']
 
+/*
+ * A claim reaches CIVIC/ONE first and the poster only once it has been checked,
+ * so a poster can't use what a claim says and then refuse it. After that the
+ * poster confirms the outcome or objects, and CIVIC/ONE has the final say.
+ */
 export const CLAIM_STATUSES = [
+  /** Sent. CIVIC/ONE checks it; the poster only knows that a claim came in. */
   'SUBMITTED',
-  /** The poster says the outcome happened. The admin decides after the cooling-off period. */
+  /** CIVIC/ONE checked it. The poster now sees it and confirms the outcome or objects. The cooling-off period runs from here. */
+  'APPROVED',
+  /** The poster confirmed, or didn't object in time. CIVIC/ONE pays once the cooling-off period ends. */
   'CONFIRMED',
-  /** The poster said no, with a reason; the claimant may dispute once. */
-  'REJECTED_BY_POSTER',
-  /** With the admin: the claimant disputed, or the poster never answered. */
+  /** The poster objected. CIVIC/ONE decides, and may pay anyway. */
   'DISPUTED',
-  /** The admin verified it; the payout is on its way. */
+  /** CIVIC/ONE verified it; the payout is on its way. */
   'VERIFIED',
   'PAID',
-  /** The admin rejected it, with a reason. */
+  /** CIVIC/ONE rejected it, with a reason. */
   'REJECTED',
   'WITHDRAWN',
 ] as const
 export type ClaimStatus = (typeof CLAIM_STATUSES)[number]
 
 /** Claims that stop the poster cancelling and keep the bounty alive. */
-export const CLAIM_LIVE_STATUSES: readonly ClaimStatus[] = ['SUBMITTED', 'CONFIRMED', 'DISPUTED', 'VERIFIED']
+export const CLAIM_LIVE_STATUSES: readonly ClaimStatus[] = ['SUBMITTED', 'APPROVED', 'CONFIRMED', 'DISPUTED', 'VERIFIED']
+/** The claim a bounty is waiting on: approved, and not yet paid or rejected. One per bounty at most. */
+export const CLAIM_WINNING_STATUSES: readonly ClaimStatus[] = ['APPROVED', 'CONFIRMED', 'DISPUTED', 'VERIFIED', 'PAID']
 
 export const CLAIM_DECISION_REASONS = [
   'VERIFIED',
@@ -87,7 +95,7 @@ export const CLAIM_DECISION_LABEL: Record<ClaimDecisionReason, string> = {
   LEGAL_HOLD: 'On hold at the request of SAPS or a court.',
   OTHER_CLAIM_PAID: 'Another claim on this bounty was verified and paid.',
   BOUNTY_CLOSED: 'The bounty was closed before this claim was decided.',
-  ADMIN_OVERRIDE: 'Verified by CIVIC/ONE after reviewing the poster’s rejection.',
+  ADMIN_OVERRIDE: 'Verified by CIVIC/ONE after reviewing the poster’s objection.',
 }
 
 export const BOUNTY_EVENT_KINDS = [
@@ -97,9 +105,12 @@ export const BOUNTY_EVENT_KINDS = [
   'DECLINED',
   'CLAIM_SUBMITTED',
   'CLAIM_WITHDRAWN',
+  /** CIVIC/ONE checked a claim; the poster is asked to confirm or object. */
+  'CLAIM_APPROVED',
   'CLAIM_CONFIRMED',
-  'CLAIM_REJECTED_BY_POSTER',
+  /** The poster objected to an approved claim; CIVIC/ONE decides. */
   'CLAIM_DISPUTED',
+  /** The poster didn't answer an approved claim in time, which counts as no objection. */
   'CLAIM_ESCALATED',
   'CLAIM_VERIFIED',
   'CLAIM_REJECTED',
@@ -116,6 +127,8 @@ export const BOUNTY_EVENT_KINDS = [
   'UNFROZEN',
   'REPORTED',
   'CHARGEBACK',
+  /** Something an admin has to act on: a claim to check, a confirmation, an objection. Addressed to each admin. */
+  'REVIEW_NEEDED',
 ] as const
 export type BountyEventKind = (typeof BOUNTY_EVENT_KINDS)[number]
 
@@ -156,11 +169,8 @@ export const BOUNTY_NOTE_MAX = 500
 export const BOUNTY_DURATIONS_DAYS = [30, 60, 90] as const
 export const BOUNTY_DEFAULT_DURATION_DAYS = 30
 export const MISSING_PERSON_MAX_DAYS = 30
-/** Days the poster has to answer a claim before it goes to an admin. */
-export const CLAIM_POSTER_RESPONSE_DAYS = 14
-export const CLAIM_POSTER_REMINDER_DAYS = 7
-/** Days a claimant has to dispute a poster's rejection. */
-export const CLAIM_DISPUTE_DAYS = 7
+/** Days the poster has to confirm or object once CIVIC/ONE approves a claim; silence counts as no objection. */
+export const CLAIM_POSTER_RESPONSE_DAYS = 7
 /** A new payout account can't receive money until this long after it was added. */
 export const PAYOUT_ACCOUNT_HOLD_HOURS = 72
 /** An unpaid bounty is abandoned after this. */
@@ -181,7 +191,7 @@ export interface BountyKindRule {
   /** What a claim must include. */
   evidence: string
   requiresCaseNumber: boolean
-  /** Hours between the poster confirming a claim and an admin being able to release the money. */
+  /** Hours between CIVIC/ONE approving a claim and the money being released. */
   cooldownHours: number
   maxDays: number
   titlePlaceholder: string
@@ -238,10 +248,10 @@ export const BOUNTY_STATUS_LABEL: Record<BountyStatus, string> = {
 }
 
 export const CLAIM_STATUS_LABEL: Record<ClaimStatus, string> = {
-  SUBMITTED: 'Waiting for the poster',
+  SUBMITTED: 'Being checked by CIVIC/ONE',
+  APPROVED: 'Approved, waiting for the poster',
   CONFIRMED: 'Confirmed by the poster',
-  REJECTED_BY_POSTER: 'Rejected by the poster',
-  DISPUTED: 'With CIVIC/ONE',
+  DISPUTED: 'The poster objected',
   VERIFIED: 'Verified',
   PAID: 'Paid',
   REJECTED: 'Rejected',
@@ -271,7 +281,9 @@ export function normaliseCaseNumber(raw: string): string | null {
 }
 
 export const bountyExpiresAt = (fundedAt: Date, durationDays: number) => new Date(fundedAt.getTime() + durationDays * 24 * 60 * 60_000)
-export const claimCooldownEnds = (confirmedAt: Date, kind: BountyKind) => new Date(confirmedAt.getTime() + BOUNTY_KIND_RULES[kind].cooldownHours * 60 * 60_000)
+export const claimCooldownEnds = (approvedAt: Date, kind: BountyKind) => new Date(approvedAt.getTime() + BOUNTY_KIND_RULES[kind].cooldownHours * 60 * 60_000)
+/** When the poster's time to confirm or object to an approved claim runs out. */
+export const posterAnswerDue = (approvedAt: Date) => new Date(approvedAt.getTime() + CLAIM_POSTER_RESPONSE_DAYS * 24 * 60 * 60_000)
 export const payoutAccountReadyAt = (createdAt: Date) => new Date(createdAt.getTime() + PAYOUT_ACCOUNT_HOLD_HOURS * 60 * 60_000)
 
 /** Mentions are refused in bounty text: a bounty names an outcome, never a person. */
@@ -282,6 +294,6 @@ export const BOUNTY_RULES_SUMMARY = [
   'Nobody is named. A bounty describes a vehicle, an item, a missing person or a case, never a suspect.',
   'Property comes back through SAPS. Never buy it back from whoever has it.',
   'Information goes to SAPS first; the bounty rewards what SAPS can use.',
-  'You confirm a claim; CIVIC/ONE verifies it after a cooling-off period and pays the claimant’s bank account.',
+  'CIVIC/ONE checks every claim before you see it. You then confirm the outcome or object, and CIVIC/ONE pays the claimant’s bank account after a cooling-off period.',
   'You can cancel for a full refund at any time until someone claims. After that, ask us and we’ll decide.',
 ] as const

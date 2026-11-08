@@ -54,7 +54,8 @@ export async function deleteAccount(db: Database, viewer: User): Promise<void> {
     await tx.update(ledgerEntries).set({ status: 'FAILED', note: 'Account deleted' }).where(and(inArray(ledgerEntries.bountyId, drafts), eq(ledgerEntries.status, 'PENDING')))
     await tx.update(bounties).set({ status: 'ABANDONED', closedAt: new Date() }).where(and(eq(bounties.posterId, viewer.id), eq(bounties.status, 'PENDING_PAYMENT')))
     await tx.update(bounties).set({ removedAt: new Date() }).where(and(eq(bounties.posterId, viewer.id), isNull(bounties.removedAt)))
-    await tx.update(bountyClaims).set({ status: 'WITHDRAWN' }).where(and(eq(bountyClaims.claimantId, viewer.id), inArray(bountyClaims.status, ['SUBMITTED', 'REJECTED_BY_POSTER'])))
+    // Approved claims hold money for the account (heldForUser), so only unchecked ones can be left behind.
+    await tx.update(bountyClaims).set({ status: 'WITHDRAWN' }).where(and(eq(bountyClaims.claimantId, viewer.id), eq(bountyClaims.status, 'SUBMITTED')))
     await tx.update(payoutAccounts).set({ status: 'REPLACED', replacedAt: new Date() }).where(and(eq(payoutAccounts.userId, viewer.id), eq(payoutAccounts.status, 'ACTIVE')))
 
     await tx.delete(users).where(eq(users.id, viewer.id))

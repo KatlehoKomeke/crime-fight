@@ -22,7 +22,7 @@ The prototype was one 289-line component with hard-coded posts. This version kee
 - **Trust you can't fake:** "Verified update / Official source" badges come from verified roles, not post text. Only verified officials and newsrooms can publish alerts.
 - **Privacy by default:** the composer flags ID numbers, card numbers, phone numbers, emails and street addresses *as you type* (no network call). It warns and never blocks: the author decides.
 - **Private messages:** instant one-to-one conversations between people who follow each other, delivered live over AppSync Events, with unread badges that stay in step across devices.
-- **Bounties:** rewards for recoveries, safe returns and information to SAPS, paid in up front, held by CIVIC/ONE, and released only after the poster confirms a claim and an administrator verifies it. Paystack behind a provider interface; a sandbox provider locally; switched off in production until the legal gate is cleared ([ADR 0006](docs/adr/0006-bounties.md)).
+- **Bounties:** rewards for recoveries, safe returns and information to SAPS, paid in up front, held by CIVIC/ONE, and released only after an administrator checks the claim, the poster confirms it or has the chance to object, and an administrator verifies it. Paystack behind a provider interface; a sandbox provider locally; switched off in production until the legal gate is cleared ([ADR 0006](docs/adr/0006-bounties.md)).
 - **Instant interactions:** optimistic likes, reposts, saves and follows over a normalised cache, so one change updates every screen.
 - **Accessible:** semantic roles, labels, live-region toasts, reduced-motion support, visible focus rings, and body text at 15px instead of 8–9px.
 

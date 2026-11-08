@@ -57,6 +57,13 @@
       "when": 1793877548218,
       "tag": "0007_takedown_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794130395021,
+      "tag": "0008_claims_checked_first",
+      "breakpoints": true
     }
   ]
 }

@@ -162,7 +162,7 @@ function EmergencyCard() {
 
 const HOW_BOUNTIES_WORK = [
   'You pay the reward in. CIVIC/ONE holds it.',
-  'A claim is confirmed by you and verified by us before anything is paid.',
+  'We check every claim, you confirm it, and we pay after a waiting period.',
   'No claim? The full amount comes back to you.',
 ]
 

@@ -22,9 +22,14 @@ type Bounty {
   claimCount: Int!
 
   """
-  Every claim, oldest first. Poster and admins only; others get an empty list. Withdrawn claims are for admins only.
+  Claims, oldest first. Admins see every one; the poster only those CIVIC/ONE has approved; everyone else an empty list.
   """
   claims: [BountyClaim!]!
+
+  """
+  Claims CIVIC/ONE is still checking, which the poster can’t see yet. Poster and admins only; 0 for everyone else.
+  """
+  claimsBeingChecked: Int!
   closedAt: DateTime
   createdAt: DateTime!
   currency: String!
@@ -74,7 +79,7 @@ type Bounty {
   viewerClaim: BountyClaim
   viewerIsPoster: Boolean!
 
-  """The confirmed, verified or paid claim. Poster and admins only."""
+  """The claim CIVIC/ONE approved, through to paid. Poster and admins only."""
   winningClaim: BountyClaim
 }
 
@@ -90,6 +95,8 @@ type BountyCheckout {
 Someone saying they fulfilled a bounty. Visible to the claimant, the poster and admins.
 """
 type BountyClaim {
+  """When CIVIC/ONE approved it; the cooling-off period runs from here."""
+  approvedAt: DateTime
   body: String!
   bounty: Bounty!
   claimant: User
@@ -115,7 +122,14 @@ type BountyClaim {
   """
   payoutAccount: PayoutAccount
 
-  """The poster’s reason for declining, which the claimant sees."""
+  """
+  Until when the poster can confirm or object to an approved claim; after that, silence counts as no objection.
+  """
+  posterAnswerDue: DateTime
+
+  """
+  Why the poster objected to the claim, for the reviewer. Poster and admins only.
+  """
   posterNote: String
 
   """What an admin should weigh before paying. Admins only."""
@@ -163,11 +177,11 @@ enum BountyEventKind {
   CANCELLED
   CANCEL_REQUESTED
   CHARGEBACK
+  CLAIM_APPROVED
   CLAIM_CONFIRMED
   CLAIM_DISPUTED
   CLAIM_ESCALATED
   CLAIM_REJECTED
-  CLAIM_REJECTED_BY_POSTER
   CLAIM_SUBMITTED
   CLAIM_VERIFIED
   CLAIM_WITHDRAWN
@@ -183,6 +197,7 @@ enum BountyEventKind {
   REFUNDED
   REFUND_FAILED
   REPORTED
+  REVIEW_NEEDED
   UNFROZEN
 }
 
@@ -220,7 +235,11 @@ enum BountyStatus {
   RELEASING
 }
 
+"""
+APPROVE a new claim after checking it (the poster then confirms or objects), VERIFY one to pay it, or REJECT.
+"""
 enum ClaimDecision {
+  APPROVE
   REJECT
   VERIFY
 }
@@ -241,11 +260,11 @@ enum ClaimDecisionReason {
 }
 
 enum ClaimStatus {
+  APPROVED
   CONFIRMED
   DISPUTED
   PAID
   REJECTED
-  REJECTED_BY_POSTER
   SUBMITTED
   VERIFIED
   WITHDRAWN
@@ -393,7 +412,7 @@ type Mutation {
   confirmBountyPayment(id: ID!): Bounty!
 
   """
-  The poster confirms the outcome happened. CIVIC/ONE verifies after the cooling-off period.
+  The poster confirms the outcome of a claim CIVIC/ONE approved. CIVIC/ONE pays after the cooling-off period.
   """
   confirmClaim(id: ID!, note: String): BountyClaim!
 
@@ -404,7 +423,7 @@ type Mutation {
   createPost(input: CreatePostInput!): Post!
 
   """
-  Verifies (and pays) or rejects a confirmed or disputed claim. Admins only.
+  Approves a new claim, verifies (and pays) one the poster answered, or rejects. Admins only.
   """
   decideClaim(decision: ClaimDecision!, id: ID!, note: String!, reason: ClaimDecisionReason!): BountyClaim!
   declineBounty(id: ID!, note: String!): Bounty!
@@ -414,14 +433,15 @@ type Mutation {
   """
   deleteAccount(handle: String!): Boolean!
   deletePost(id: ID!): ID!
-
-  """The claimant disagrees with a rejection; CIVIC/ONE decides."""
-  disputeClaim(id: ID!, note: String!): BountyClaim!
   followUser(id: ID!): User!
   freezeBounty(id: ID!, note: String!): Bounty!
   likePost(id: ID!): Post!
   markConversationRead(id: ID!): InboxEvent!
-  rejectClaim(id: ID!, note: String!): BountyClaim!
+
+  """
+  The poster objects to a claim CIVIC/ONE approved, with a reason for the reviewer. CIVIC/ONE decides, and may pay anyway.
+  """
+  objectToClaim(id: ID!, note: String!): BountyClaim!
   reportBounty(id: ID!, note: String, reason: BountyReportReason!): Bounty!
   repostPost(id: ID!): Post!
   requestBountyCancellation(id: ID!, note: String!): Bounty!

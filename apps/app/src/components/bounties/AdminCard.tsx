@@ -3,6 +3,7 @@ import {
   BOUNTY_STATUS_LABEL,
   CLAIM_DECISION_LABEL,
   CLAIM_DECISION_REASONS,
+  CLAIM_POSTER_RESPONSE_DAYS,
   type ClaimDecisionReason,
   formatRelativeTime,
   formatZar,
@@ -145,7 +146,7 @@ function AdminClaim({ claim, bounty }: { claim: Claim; bounty: Bounty }) {
   const c = useColors()
   const account = claim.payoutAccount
   const risks = signals(claim)
-  const decidable = (claim.status === 'CONFIRMED' || claim.status === 'DISPUTED') && DECIDABLE.includes(bounty.status)
+  const decidable = ['SUBMITTED', 'APPROVED', 'CONFIRMED', 'DISPUTED'].includes(claim.status) && DECIDABLE.includes(bounty.status)
   return (
     <View style={[styles.claim, { borderColor: c.line }]}>
       <ClaimantRow claimant={claim.claimant} meta={claim.claimant ? `joined ${formatDate(claim.claimant.createdAt)}` : undefined} />
@@ -160,12 +161,12 @@ function AdminClaim({ claim, bounty }: { claim: Claim; bounty: Bounty }) {
       ) : null}
       {claim.posterNote ? (
         <Txt variant="small" color="textMuted">
-          Poster’s reason for declining: “{claim.posterNote}”
+          Poster’s objection: “{claim.posterNote}”
         </Txt>
       ) : null}
-      {claim.disputeNote ? (
+      {claim.status === 'APPROVED' && claim.posterAnswerDue ? (
         <Txt variant="small" color="textMuted">
-          Dispute: “{claim.disputeNote}”
+          The poster can confirm or object until {formatDateTime(claim.posterAnswerDue)}. After that, silence counts as no objection.
         </Txt>
       ) : null}
       {claim.decisionReason ? (
@@ -209,24 +210,38 @@ function AdminClaim({ claim, bounty }: { claim: Claim; bounty: Bounty }) {
   )
 }
 
+/**
+ * What a reviewer can do with a claim, in order: approve a new one after
+ * checking it, then pay it once the poster has confirmed, objected (an
+ * override) or let the answer period run out; or reject it at any point.
+ */
 function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boolean }) {
   const c = useColors()
   const toast = useToast()
-  const [dialog, setDialog] = useState<'verify' | 'reject' | null>(null)
+  const [dialog, setDialog] = useState<'approve' | 'verify' | 'reject' | null>(null)
   const [weighed, setWeighed] = useState(false)
   const [reason, setReason] = useState<ClaimDecisionReason | null>(null)
   const [{ fetching }, decide] = useMutation(DecideClaim)
   const amount = formatZar(bounty.amountCents)
   const handle = claim.claimant ? `@${claim.claimant.handle}` : 'a former member'
   const account = claim.payoutAccount
+  const checking = claim.status === 'SUBMITTED'
+  // One approved claim per bounty: another can be approved only once that one is rejected or withdrawn.
+  const approvable = checking && bounty.status === 'OPEN' && !bounty.winningClaim
 
-  const blocker = claim.cooldownUntil && inFuture(claim.cooldownUntil)
-    ? `Cooling-off ends ${timeUntil(claim.cooldownUntil)}`
-    : !account
-      ? 'The claimant hasn’t added a bank account'
-      : inFuture(account.readyAt)
-        ? `The bank account is ready ${timeUntil(account.readyAt)}`
-        : null
+  const blocker = checking
+    ? approvable
+      ? null
+      : 'Another claim on this bounty is approved. Decide that one first.'
+    : claim.status === 'APPROVED' && claim.posterAnswerDue && inFuture(claim.posterAnswerDue)
+      ? `The poster can answer until ${formatDateTime(claim.posterAnswerDue)}`
+      : claim.cooldownUntil && inFuture(claim.cooldownUntil)
+        ? `Cooling-off ends ${timeUntil(claim.cooldownUntil)}`
+        : !account
+          ? 'The claimant hasn’t added a bank account'
+          : inFuture(account.readyAt)
+            ? `The bank account is ready ${timeUntil(account.readyAt)}`
+            : null
 
   const close = () => {
     setDialog(null)
@@ -234,7 +249,7 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
     setReason(null)
   }
 
-  const run = async (decision: 'VERIFY' | 'REJECT', chosen: ClaimDecisionReason, note: string, done: string) => {
+  const run = async (decision: 'APPROVE' | 'VERIFY' | 'REJECT', chosen: ClaimDecisionReason, note: string, done: string) => {
     const result = await decide({ id: claim.id, decision, reason: chosen, note })
     toast(result.error ? (result.error.graphQLErrors[0]?.message ?? 'That didn’t go through. Reload and try again.') : done)
     close()
@@ -243,7 +258,11 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
   return (
     <>
       <View style={styles.actions}>
-        <Button label="Verify and pay" icon="check" disabled={blocker !== null} onPress={() => setDialog('verify')} />
+        {checking ? (
+          <Button label="Approve" icon="check" disabled={blocker !== null} onPress={() => setDialog('approve')} />
+        ) : (
+          <Button label="Verify and pay" icon="check" disabled={blocker !== null} onPress={() => setDialog('verify')} />
+        )}
         <Button label="Reject" tone="outline" onPress={() => setDialog('reject')} />
       </View>
       {blocker ? (
@@ -251,6 +270,18 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
           {blocker}
         </Txt>
       ) : null}
+      <NoteDialog
+        open={dialog === 'approve'}
+        title={`Approve this claim from ${handle}?`}
+        body={`The poster then sees the claim and who sent it, and has ${CLAIM_POSTER_RESPONSE_DAYS} days to confirm or object. The bounty stops taking new claims, and the waiting period before payment starts now.`}
+        label="Note to both parties"
+        hint="The poster and the claimant see this with the approval."
+        placeholder="What you checked, for example with the SAPS station"
+        confirmLabel="Approve"
+        loading={fetching}
+        onConfirm={(note) => void run('APPROVE', 'VERIFIED', note, 'Claim approved. The poster is asked to confirm it.')}
+        onClose={close}
+      />
       <NoteDialog
         open={dialog === 'verify'}
         title={`Pay ${amount} to ${handle}${account ? ` (${account.bankName} •••• ${account.accountLast4}, “${account.accountName}”)` : ''}?`}
@@ -267,7 +298,7 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
       >
         {claim.status === 'DISPUTED' ? (
           <Txt variant="small" color="textMuted">
-            The poster declined this claim, so paying it is recorded as an override.
+            The poster objected to this claim, so paying it is recorded as an override.
           </Txt>
         ) : null}
         {red ? <Checkbox checked={weighed} onChange={setWeighed} label="I’ve weighed the risk signals above and am releasing anyway" /> : null}
@@ -275,9 +306,13 @@ function Decide({ claim, bounty, red }: { claim: Claim; bounty: Bounty; red: boo
       <NoteDialog
         open={dialog === 'reject'}
         title="Reject this claim?"
-        body="The claimant is told the reason. If this is the confirmed claim, the bounty goes back to taking claims."
+        body={
+          checking
+            ? 'The claimant is told the reason. The poster never saw this claim and isn’t told about it.'
+            : 'The claimant is told the reason. The bounty goes back to taking claims.'
+        }
         label="Note to the claimant"
-        hint="The claimant sees this with the reason; the poster sees the reason only."
+        hint={checking ? 'The claimant sees this with the reason.' : 'The claimant sees this with the reason; the poster sees the reason only.'}
         placeholder="What was missing"
         confirmLabel="Reject claim"
         confirmTone="danger"

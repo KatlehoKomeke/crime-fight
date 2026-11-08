@@ -1,10 +1,10 @@
-import { BOUNTY_NOTE_MAX, CLAIM_DISPUTE_DAYS, CLAIM_POSTER_RESPONSE_DAYS, formatRelativeTime, formatZar, PAYOUT_ACCOUNT_HOLD_HOURS } from '@civic/core'
+import { BOUNTY_NOTE_MAX, formatRelativeTime, formatZar, PAYOUT_ACCOUNT_HOLD_HOURS } from '@civic/core'
 import type { BountyDetailFieldsFragment, ClaimFieldsFragment } from '@civic/graphql'
 import { Link, useRouter } from 'expo-router'
 import { type ReactNode, useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 import { useMutation } from 'urql'
-import { DisputeClaim, WithdrawClaim } from '@/graphql/documents'
+import { WithdrawClaim } from '@/graphql/documents'
 import { claimStatusLabel, claimTone, decisionLabel, formatDate, formatDateTime, toneColor } from '@/lib/bounty-copy'
 import { profilePath } from '@/lib/profile'
 import { radius, useColors } from '@/theme'
@@ -19,10 +19,6 @@ import { Avatar, Button, Field, Input, Txt, VerifiedBadge } from '../ui'
  * note before something irreversible happens. The poster's and the admin's
  * cards build on the same pieces.
  */
-
-const DAY_MS = 24 * 60 * 60_000
-
-export const addDays = (value: string, days: number) => new Date(new Date(value).getTime() + days * DAY_MS)
 
 /** Whether a deadline is still ahead. Only rendered for a signed-in viewer, so the server never has to agree. */
 export const inFuture = (value: string | Date) => new Date(value).getTime() > Date.now()
@@ -194,64 +190,58 @@ function Outcome({ claim, bounty }: { claim: ClaimFieldsFragment; bounty: Bounty
   const c = useColors()
   const router = useRouter()
   const amount = formatZar(bounty.amountCents)
+  const waiting = claim.cooldownUntil ? ` ending ${formatDateTime(claim.cooldownUntil)}` : ''
+  // Whatever the poster says, the money goes to the account in Settings: worth checking while the claim is decided.
+  const accountNotice = (
+    <View style={[styles.notice, { backgroundColor: c.warningTint }]}>
+      <Icon name="bounty" size={15} color={c.warning} />
+      <View style={{ flex: 1, gap: 10 }}>
+        <Txt variant="small">
+          <Txt variant="smallStrong">Make sure the bank account in Settings is yours. </Txt>
+          That’s where {amount} goes. A new account can be paid {PAYOUT_ACCOUNT_HOLD_HOURS} hours after you add it.
+        </Txt>
+        <Button label="Open Settings" tone="outline" size="sm" icon="settings" onPress={() => router.push('/settings')} />
+      </View>
+    </View>
+  )
   switch (claim.status) {
     case 'SUBMITTED':
       return (
         <>
           <Txt variant="small" color="textMuted">
-            The poster has been notified and has {CLAIM_POSTER_RESPONSE_DAYS} days to answer. If they confirm, CIVIC/ONE verifies and pays you.
+            CIVIC/ONE checks your claim first, usually within a few days, and may contact the SAPS station you named. The poster only sees it once we approve it.
           </Txt>
           <WithdrawAction claimId={claim.id} />
         </>
       )
-    case 'REJECTED_BY_POSTER': {
-      const until = claim.rejectedAt ? addDays(claim.rejectedAt, CLAIM_DISPUTE_DAYS) : null
-      const canDispute = !until || inFuture(until)
+    case 'APPROVED':
       return (
         <>
           <Txt variant="small" color="textMuted">
-            The poster declined this claim{claim.posterNote ? `: “${claim.posterNote}”` : ''}.
-            {canDispute ? ` If you think that’s wrong, you can ask a CIVIC/ONE reviewer to look at it${until ? ` until ${formatDate(until)}` : ''}.` : ''}
+            Approved by CIVIC/ONE. The poster can confirm it or object{claim.posterAnswerDue ? ` until ${formatDate(claim.posterAnswerDue)}` : ''}; if they don’t answer, that counts as no objection. CIVIC/ONE pays after a waiting period{waiting}.
           </Txt>
-          {canDispute ? (
-            <DisputeAction claimId={claim.id} />
-          ) : (
-            <Txt variant="small" color="textMuted">
-              The time to dispute this decision has passed.
-            </Txt>
-          )}
+          {accountNotice}
+          <WithdrawAction claimId={claim.id} />
         </>
       )
-    }
     case 'DISPUTED':
       return (
         <>
           <Txt variant="small" color="textMuted">
-            A CIVIC/ONE reviewer will decide. You may be asked for more detail.
+            The poster objected. A CIVIC/ONE reviewer decides, may ask you for more detail, and can pay the reward anyway.
           </Txt>
-          {claim.disputeNote ? (
-            <Txt variant="small" color="textMuted">
-              “{claim.disputeNote}”
-            </Txt>
-          ) : null}
+          {accountNotice}
+          <WithdrawAction claimId={claim.id} />
         </>
       )
     case 'CONFIRMED':
       return (
         <>
           <Txt variant="small" color="textMuted">
-            Confirmed by the poster. CIVIC/ONE verifies after a waiting period{claim.cooldownUntil ? ` ending ${formatDateTime(claim.cooldownUntil)}` : ''}.
+            Confirmed. CIVIC/ONE pays after a waiting period{waiting}.
           </Txt>
-          <View style={[styles.notice, { backgroundColor: c.warningTint }]}>
-            <Icon name="bounty" size={15} color={c.warning} />
-            <View style={{ flex: 1, gap: 10 }}>
-              <Txt variant="small">
-                <Txt variant="smallStrong">Make sure the bank account in Settings is yours and ready. </Txt>
-                That’s where {amount} goes. Payouts start {PAYOUT_ACCOUNT_HOLD_HOURS} hours after you add an account, so add one now if you haven’t.
-              </Txt>
-              <Button label="Open Settings" tone="outline" size="sm" icon="settings" onPress={() => router.push('/settings')} />
-            </View>
-          </View>
+          {accountNotice}
+          <WithdrawAction claimId={claim.id} />
         </>
       )
     case 'VERIFIED':
@@ -309,38 +299,6 @@ function WithdrawAction({ claimId }: { claimId: string }) {
         confirmTone="danger"
         loading={fetching}
         onConfirm={() => void run()}
-        onClose={() => setOpen(false)}
-      />
-    </>
-  )
-}
-
-function DisputeAction({ claimId }: { claimId: string }) {
-  const toast = useToast()
-  const [open, setOpen] = useState(false)
-  const [{ fetching }, dispute] = useMutation(DisputeClaim)
-
-  const run = async (note: string) => {
-    const result = await dispute({ id: claimId, note })
-    if (result.error) toast(result.error.graphQLErrors[0]?.message ?? 'Couldn’t send that. Try again.')
-    else toast('Sent. A CIVIC/ONE reviewer will decide.')
-    setOpen(false)
-  }
-
-  return (
-    <>
-      <View style={styles.actions}>
-        <Button label="Ask for a review" tone="outline" size="sm" onPress={() => setOpen(true)} />
-      </View>
-      <NoteDialog
-        open={open}
-        title="Ask CIVIC/ONE to review this?"
-        body="Say why your claim honours the bounty. A reviewer decides, and can pay the reward even though the poster declined."
-        label="Why the claim should stand"
-        placeholder="What you did, and what the poster may have missed"
-        confirmLabel="Ask for a review"
-        loading={fetching}
-        onConfirm={(note) => void run(note)}
         onClose={() => setOpen(false)}
       />
     </>

@@ -79,6 +79,7 @@ export function bountyTone(status: BountyStatus, isExpired = false): StatusTone 
 export function claimTone(status: ClaimStatus): StatusTone {
   switch (status) {
     case 'SUBMITTED':
+    case 'APPROVED':
     case 'CONFIRMED':
     case 'DISPUTED':
       return 'busy'
@@ -86,7 +87,6 @@ export function claimTone(status: ClaimStatus): StatusTone {
     case 'PAID':
       return 'done'
     case 'REJECTED':
-    case 'REJECTED_BY_POSTER':
       return 'danger'
     default:
       return 'muted'
@@ -139,10 +139,15 @@ export const decisionLabel = (reason: ClaimDecisionReason | null | undefined) =>
 
 const quoted = (title: string) => `“${title}”`
 
-/** What a bounty notification says, from the event and the bounty it's about. */
-export function bountyNotificationText(event: BountyEventKind, bounty: { title: string; amountCents: number }): string {
+/**
+ * What a bounty notification says, from the event and the bounty it's about.
+ * Some events reach both sides (an approval tells the poster and the
+ * claimant), so the wording follows whether the reader posted the bounty.
+ */
+export function bountyNotificationText(event: BountyEventKind, bounty: { title: string; amountCents: number; viewerIsPoster?: boolean }): string {
   const amount = formatZar(bounty.amountCents)
   const title = quoted(bounty.title)
+  const poster = bounty.viewerIsPoster === true
   switch (event) {
     case 'CREATED':
       return `You posted ${title}`
@@ -153,21 +158,25 @@ export function bountyNotificationText(event: BountyEventKind, bounty: { title: 
     case 'DECLINED':
       return `We couldn’t list ${title}. The full amount is being refunded.`
     case 'CLAIM_SUBMITTED':
-      return `Someone sent a claim on your ${amount} bounty ${title}`
+      return `Someone sent a claim on your ${amount} bounty ${title}. CIVIC/ONE checks it before you see it.`
     case 'CLAIM_WITHDRAWN':
       return `A claim on your ${amount} bounty ${title} was withdrawn`
+    case 'CLAIM_APPROVED':
+      return poster
+        ? `CIVIC/ONE checked a claim on ${title}. Confirm it, or tell us why you object.`
+        : `CIVIC/ONE approved your claim on ${title}. The poster is asked to confirm it next.`
     case 'CLAIM_CONFIRMED':
-      return `The poster confirmed your claim on ${title}. CIVIC/ONE verifies it next.`
-    case 'CLAIM_REJECTED_BY_POSTER':
-      return `The poster declined your claim on ${title}. You can ask CIVIC/ONE to review it.`
+      return `The poster confirmed your claim on ${title}. CIVIC/ONE pays it after the waiting period.`
     case 'CLAIM_DISPUTED':
-      return `A claim on your bounty ${title} is with CIVIC/ONE to decide`
+      return `The poster objected to your claim on ${title}. A CIVIC/ONE reviewer decides, and may pay it anyway.`
     case 'CLAIM_ESCALATED':
-      return `A claim on ${title} went to CIVIC/ONE because it wasn’t answered in time`
+      return poster
+        ? `You didn’t answer the claim on ${title} in time, which counts as no objection`
+        : `The poster didn’t answer your claim on ${title} in time, which counts as no objection. CIVIC/ONE pays it after the waiting period.`
     case 'CLAIM_VERIFIED':
       return `Your claim on ${title} was verified. ${amount} is on its way.`
     case 'CLAIM_REJECTED':
-      return `Your claim on ${title} wasn’t accepted`
+      return poster ? `CIVIC/ONE rejected the claim on ${title}` : `Your claim on ${title} wasn’t accepted`
     case 'PAYOUT_SENT':
       return `${amount} has been sent to your bank account for ${title}`
     case 'PAYOUT_FAILED':
@@ -194,6 +203,8 @@ export function bountyNotificationText(event: BountyEventKind, bounty: { title: 
       return `${title} was reported`
     case 'CHARGEBACK':
       return `A payment dispute was opened on ${title}`
+    case 'REVIEW_NEEDED':
+      return `${title} needs a review`
   }
 }
 
@@ -212,14 +223,14 @@ export function bountyEventText(event: BountyEventKind): string {
       return 'A claim was submitted'
     case 'CLAIM_WITHDRAWN':
       return 'A claim was withdrawn'
+    case 'CLAIM_APPROVED':
+      return 'CIVIC/ONE checked a claim; the poster confirms next'
     case 'CLAIM_CONFIRMED':
       return 'The poster confirmed a claim'
-    case 'CLAIM_REJECTED_BY_POSTER':
-      return 'The poster declined a claim'
     case 'CLAIM_DISPUTED':
-      return 'A claimant asked CIVIC/ONE to review a decision'
+      return 'The poster objected to a claim; CIVIC/ONE decides'
     case 'CLAIM_ESCALATED':
-      return 'A claim went to CIVIC/ONE: the poster didn’t answer in time'
+      return 'The poster didn’t answer in time, which counts as no objection'
     case 'CLAIM_VERIFIED':
       return 'Verified by CIVIC/ONE'
     case 'CLAIM_REJECTED':
@@ -250,5 +261,7 @@ export function bountyEventText(event: BountyEventKind): string {
       return 'Reported'
     case 'CHARGEBACK':
       return 'Payment dispute with the poster’s bank'
+    case 'REVIEW_NEEDED':
+      return 'Waiting for a CIVIC/ONE reviewer'
   }
 }

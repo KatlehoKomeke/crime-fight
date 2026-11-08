@@ -141,7 +141,8 @@ function BountyDetail({ bounty, admin, signedIn, signedOut, live, review }: { bo
   const amount = formatZar(bounty.amountCents)
   const when = whenRow(bounty)
   const listed = BOUNTY_LISTED_STATUSES.includes(bounty.status)
-  const canClaim = bounty.status === 'OPEN' && !bounty.isExpired && !poster && !liveClaim
+  // A bounty can be claimed once per person, withdrawn claims included.
+  const canClaim = bounty.status === 'OPEN' && !bounty.isExpired && !poster && claim === null
   const paused = (bounty.status === 'AWAITING_VERIFICATION' || bounty.status === 'RELEASING') && !poster && !liveClaim
   const closedToClaims = bounty.status === 'OPEN' && bounty.isExpired && !poster && !liveClaim
 

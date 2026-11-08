@@ -290,10 +290,12 @@ export const bountyClaims = pgTable(
     body: text().notNull(),
     /** Up to three https links, one per line, shown as text. */
     links: text().notNull().default(''),
-    /** The poster's reason for rejecting, which the claimant sees. */
+    /** Why the poster objected to an approved claim. Poster and admins only. */
     posterNote: text(),
     /** What the poster told the reviewer when confirming. Poster and admins only; the claimant never sees it. */
     confirmNote: text(),
+    /** When CIVIC/ONE approved it. Until then the poster sees neither the claim nor who sent it. */
+    approvedAt: ts(),
     /** The claimant's dispute of a rejection. */
     disputeNote: text(),
     decisionReason: text({ enum: CLAIM_DECISION_REASONS }),
@@ -317,13 +319,13 @@ export const bountyClaims = pgTable(
     check('bounty_claims_reason_valid', oneOf(t.decisionReason, CLAIM_DECISION_REASONS)),
     index('bounty_claims_bounty_idx').on(t.bountyId, t.createdAt),
     index('bounty_claims_claimant_idx').on(t.claimantId, t.createdAt.desc()),
-    // One live claim per person per bounty, and at most one that wins.
+    // One live claim per person per bounty, and at most one that CIVIC/ONE has approved.
     uniqueIndex('bounty_claims_one_live_idx')
       .on(t.bountyId, t.claimantId)
-      .where(sql`${t.status} in ('SUBMITTED', 'CONFIRMED', 'REJECTED_BY_POSTER', 'DISPUTED', 'VERIFIED', 'PAID')`),
+      .where(sql`${t.status} in ('SUBMITTED', 'APPROVED', 'CONFIRMED', 'DISPUTED', 'VERIFIED', 'PAID')`),
     uniqueIndex('bounty_claims_one_winner_idx')
       .on(t.bountyId)
-      .where(sql`${t.status} in ('CONFIRMED', 'VERIFIED', 'PAID')`),
+      .where(sql`${t.status} in ('APPROVED', 'CONFIRMED', 'DISPUTED', 'VERIFIED', 'PAID')`),
   ],
 )
 

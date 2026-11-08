@@ -729,6 +729,23 @@ describe('bounties', () => {
     await gql(PAY, { id }, as)
     return id
   }
+  /** CIVIC/ONE checks a new claim and approves it, so the poster sees it. */
+  const APPROVE = (id: string, as = 'civicone') => gql(DECIDE, { id, decision: 'APPROVE', reason: 'VERIFIED', note: 'Checked with the station.' }, as)
+  /** A bank account past its 72-hour hold: a member needs one to claim. */
+  const bank = async (h: string, last4 = '4455') => {
+    const [member] = await handle.db.select().from(schema.users).where(eq(schema.users.handle, h))
+    await handle.db.insert(schema.payoutAccounts).values({
+      userId: member!.id,
+      provider: 'sandbox',
+      recipientCode: `RCP_sandbox_250655_${last4}`,
+      bankCode: '250655',
+      bankName: 'FNB',
+      accountName: member!.displayName,
+      accountLast4: last4,
+      fingerprint: `test-${h}-${last4}`,
+      createdAt: new Date(Date.now() - 100 * 3600_000),
+    })
+  }
 
   it('shows open bounties on the board, honoured ones on their own, and nothing unpaid or under review', async () => {
     expect(titles(await gql(BOARD)).sort()).toEqual(['Information on the Harbor Avenue camera vandalism', 'Silver 2016 Toyota Corolla'])
@@ -771,14 +788,47 @@ describe('bounties', () => {
     await handle.db.delete(schema.users).where(eq(schema.users.handle, 'newbie'))
   })
 
-  it('tells the public a claim came in, but not from whom', async () => {
+  it('needs a bank account to claim', async () => {
+    const corolla = await seeded('Silver 2016')
+    const refused = await gql(CLAIM, { bountyId: corolla.id, input: { body: claimBody, attested: true } }, 'thandi_m')
+    expect(code(refused)).toBe('BAD_USER_INPUT')
+    expect(refused.errors?.[0]?.message).toMatch(/bank account/)
+    expect(refused.errors?.[0]?.extensions.needsPayoutAccount).toBe(true)
+    // A brand-new account is enough to send the claim; the 72-hour hold applies when the money is paid.
+    await gql(`mutation($input: PayoutAccountInput!) { setPayoutAccount(input: $input) { id } }`, { input: { bankCode: '250655', accountNumber: '62000004455', accountName: 'Thandi Mokoena' } }, 'thandi_m')
+    expect((await gql(CLAIM, { bountyId: corolla.id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim.status).toBe('SUBMITTED')
+  })
+
+  it('shows a claim to CIVIC/ONE first, and to the poster only once it’s approved', async () => {
     const harbor = await seeded('Information on the Harbor')
-    const EVENTS = `query($id: ID!) { bounty(id: $id) { events { kind actor { handle } } } }`
-    const submitted = (result: { data: { bounty: { events: Array<{ kind: string; actor: { handle: string } | null }> } } }) => result.data.bounty.events.find((e) => e.kind === 'CLAIM_SUBMITTED')
+    const EVENTS = `query($id: ID!) { bounty(id: $id) { claimsBeingChecked claims { id } events { kind actor { handle } } } }`
+    type Trail = { data: { bounty: { claimsBeingChecked: number; claims: Array<{ id: string }>; events: Array<{ kind: string; actor: { handle: string } | null }> } } }
+    const submitted = (result: Trail) => result.data.bounty.events.find((e) => e.kind === 'CLAIM_SUBMITTED')
     expect(submitted(await gql(EVENTS, { id: harbor.id }))?.actor).toBeNull()
     expect(submitted(await gql(EVENTS, { id: harbor.id }, 'alexm'))?.actor).toBeNull()
-    expect(submitted(await gql(EVENTS, { id: harbor.id }, 'harbor_watch'))?.actor?.handle).toBe('jordan_o')
     expect(submitted(await gql(EVENTS, { id: harbor.id }, 'jordan_o'))?.actor?.handle).toBe('jordan_o')
+    // The poster knows a claim came in, not what it says or who sent it.
+    const before = (await gql(EVENTS, { id: harbor.id }, 'harbor_watch')) as Trail
+    expect(before.data.bounty).toMatchObject({ claimsBeingChecked: 1, claims: [] })
+    expect(submitted(before)?.actor).toBeNull()
+
+    // A new claim reaches the admins, and the poster's notification names nobody.
+    await bank('thandi_m')
+    const bike = await funded('alexm')
+    await gql(CLAIM, { bountyId: bike, input: { body: claimBody, attested: true } }, 'thandi_m')
+    const NOTES = `{ notifications(first: 10) { edges { node { kind bountyEvent note actor { handle } bounty { id } } } } }`
+    type Inbox = { data: { notifications: { edges: Array<{ node: { kind: string; bountyEvent: string | null; note: string | null; actor: { handle: string } | null; bounty: { id: string } | null } }> } } }
+    const about = (result: Inbox, id: string) => result.data.notifications.edges.map((e) => e.node).filter((n) => n.kind === 'BOUNTY' && n.bounty?.id === id)
+    expect(about((await gql(NOTES, {}, 'civicone')) as Inbox, bike)).toEqual([expect.objectContaining({ bountyEvent: 'REVIEW_NEEDED', note: 'A new claim to check', actor: null })])
+    expect(about((await gql(NOTES, {}, 'alexm')) as Inbox, bike)).toEqual([expect.objectContaining({ bountyEvent: 'CLAIM_SUBMITTED', actor: null })])
+
+    // Once CIVIC/ONE approves it, the poster sees the claim and who sent it.
+    const claimId = (await gql(GET, { id: harbor.id }, 'civicone')).data.bounty.claims[0].id as string
+    expect((await APPROVE(claimId)).data.decideClaim.status).toBe('APPROVED')
+    const after = (await gql(EVENTS, { id: harbor.id }, 'harbor_watch')) as Trail
+    expect(after.data.bounty).toMatchObject({ claimsBeingChecked: 0, claims: [{ id: claimId }] })
+    expect(submitted(after)?.actor?.handle).toBe('jordan_o')
+    expect(submitted(await gql(EVENTS, { id: harbor.id }, 'alexm'))?.actor).toBeNull()
   })
 
   it('refuses bounties that break the rules, with a message the form can show', async () => {
@@ -800,23 +850,31 @@ describe('bounties', () => {
     expect((await gql(CREATE, { input: property }, 'alexm')).errors?.[0]?.message).toMatch(/3 bounties open/)
   })
 
-  it('pays the claimant once the poster confirms, the cooling-off passes and an admin verifies', async () => {
+  it('pays the claimant once CIVIC/ONE approves the claim, the poster confirms and the cooling-off passes', async () => {
     const harbor = await seeded('Information on the Harbor')
-    const { claims } = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty
+    const { claims } = (await gql(GET, { id: harbor.id }, 'civicone')).data.bounty
     expect(claims).toHaveLength(1)
     const claimId = claims[0].id as string
-    // Only the poster sees claims; the claimant sees their own.
+    // Nobody else sees the claim; the claimant sees their own.
     expect((await gql(GET, { id: harbor.id }, 'thandi_m')).data.bounty).toMatchObject({ claims: [], viewerClaim: null, claimCount: 1 })
     expect((await gql(GET, { id: harbor.id }, 'jordan_o')).data.bounty.viewerClaim.id).toBe(claimId)
+    // The poster can't answer a claim CIVIC/ONE hasn't checked, and only an admin can approve one.
+    expect(code(await gql(CONFIRM, { id: claimId }, 'harbor_watch'))).toBe('NOT_FOUND')
+    expect(code(await APPROVE(claimId, 'harbor_watch'))).toBe('FORBIDDEN')
+    const decision = { id: claimId, decision: 'VERIFY', reason: 'VERIFIED', note: 'Statement confirmed with the station.' }
+    expect((await gql(DECIDE, decision, 'civicone')).errors?.[0]?.message).toMatch(/isn’t waiting to be paid/)
+
+    expect((await APPROVE(claimId)).data.decideClaim.status).toBe('APPROVED')
+    expect((await gql(GET, { id: harbor.id })).data.bounty.status).toBe('AWAITING_VERIFICATION')
+    // Nobody else can claim now, and paying waits for the poster's answer.
+    expect((await gql(CLAIM, { bountyId: harbor.id, input: { body: claimBody, attested: true } }, 'thandi_m')).errors?.[0]?.message).toMatch(/aren’t being accepted/)
+    expect((await gql(DECIDE, decision, 'civicone')).errors?.[0]?.message).toMatch(/has until/)
     expect(code(await gql(CONFIRM, { id: claimId }, 'alexm'))).toBe('NOT_FOUND')
 
     const confirmed = await gql(CONFIRM, { id: claimId, note: 'Sgt Dlamini confirmed the statement is on the file.' }, 'harbor_watch')
     expect(confirmed.data.confirmClaim.status).toBe('CONFIRMED')
+    // The cooling-off period runs from CIVIC/ONE's approval: seven days for information.
     expect(Date.parse(confirmed.data.confirmClaim.cooldownUntil) - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60_000)
-    expect((await gql(GET, { id: harbor.id })).data.bounty.status).toBe('AWAITING_VERIFICATION')
-    // Nobody else can claim now, and nobody but an admin can decide.
-    expect((await gql(CLAIM, { bountyId: harbor.id, input: { body: claimBody, attested: true } }, 'thandi_m')).errors?.[0]?.message).toMatch(/aren’t being accepted/)
-    const decision = { id: claimId, decision: 'VERIFY', reason: 'VERIFIED', note: 'Statement confirmed with the station.' }
     expect(code(await gql(DECIDE, decision, 'harbor_watch'))).toBe('FORBIDDEN')
     const early = await gql(DECIDE, decision, 'civicone')
     expect(code(early)).toBe('BAD_USER_INPUT')
@@ -836,26 +894,57 @@ describe('bounties', () => {
     // The claimant hears about it; admin actions carry no name.
     const mine = await gql(`{ notifications(first: 10) { edges { node { kind bountyEvent actor { handle } bounty { id } } } } }`, {}, 'jordan_o')
     const events = mine.data.notifications.edges.map((e: { node: { kind: string; bountyEvent: string | null; actor: { handle: string } | null } }) => e.node).filter((n: { kind: string }) => n.kind === 'BOUNTY')
-    expect(events.map((n: { bountyEvent: string }) => n.bountyEvent)).toEqual(expect.arrayContaining(['CLAIM_CONFIRMED', 'CLAIM_VERIFIED', 'PAID']))
+    expect(events.map((n: { bountyEvent: string }) => n.bountyEvent)).toEqual(expect.arrayContaining(['CLAIM_APPROVED', 'CLAIM_CONFIRMED', 'CLAIM_VERIFIED', 'PAID']))
     expect(events.find((n: { bountyEvent: string }) => n.bountyEvent === 'CLAIM_VERIFIED').actor).toBeNull()
+    // The admins heard the poster confirm.
+    const admin = await gql(`{ notifications(first: 10) { edges { node { bountyEvent note } } } }`, {}, 'civicone')
+    expect(admin.data.notifications.edges.map((e: { node: { bountyEvent: string | null; note: string | null } }) => e.node)).toContainEqual({ bountyEvent: 'REVIEW_NEEDED', note: 'The poster confirmed. Pay once the cooling-off period ends.' })
   })
 
-  it('won’t let a poster cancel over a live claim, and lets a rejected claimant dispute', async () => {
+  it('won’t let a poster cancel over a claim being decided, and lets CIVIC/ONE pay over the poster’s objection', async () => {
     const harbor = await seeded('Information on the Harbor')
-    const claimId = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].id as string
+    const claimId = (await gql(GET, { id: harbor.id }, 'civicone')).data.bounty.claims[0].id as string
     const CANCEL = `mutation($id: ID!) { cancelBounty(id: $id) { id status } }`
-    expect((await gql(CANCEL, { id: harbor.id }, 'harbor_watch')).errors?.[0]?.message).toMatch(/claim is waiting/)
-    const rejected = await gql(`mutation($id: ID!, $note: String!) { rejectClaim(id: $id, note: $note) { status } }`, { id: claimId, note: 'The van was mine, parked there legally.' }, 'harbor_watch')
-    expect(rejected.data.rejectClaim.status).toBe('REJECTED_BY_POSTER')
-    // Still refused: the claimant has a week to dispute, and the money must still be there.
-    expect((await gql(CANCEL, { id: harbor.id }, 'harbor_watch')).errors?.[0]?.message).toMatch(/claim is waiting/)
-    const disputed = await gql(`mutation($id: ID!, $note: String!) { disputeClaim(id: $id, note: $note) { status cooldownUntil } }`, { id: claimId, note: 'The statement receipt shows the registration; please check with the station.' }, 'jordan_o')
-    expect(disputed.data.disputeClaim.status).toBe('DISPUTED')
-    // Paying over the poster's head is an override, recorded as one.
+    const OBJECT = `mutation($id: ID!, $note: String!) { objectToClaim(id: $id, note: $note) { status } }`
+    // Even unseen, a claim keeps the money where it is.
+    expect((await gql(CANCEL, { id: harbor.id }, 'harbor_watch')).errors?.[0]?.message).toMatch(/being decided/)
+    expect(code(await gql(OBJECT, { id: claimId, note: 'Not mine.' }, 'harbor_watch'))).toBe('NOT_FOUND')
+    await APPROVE(claimId)
+    const objected = await gql(OBJECT, { id: claimId, note: 'The van was mine, parked there legally.' }, 'harbor_watch')
+    expect(objected.data.objectToClaim.status).toBe('DISPUTED')
+    // The reason is for the reviewer: the claimant is told the poster objected, not why.
+    const claimant = await gql(`query($id: ID!) { bounty(id: $id) { viewerClaim { status posterNote } } }`, { id: harbor.id }, 'jordan_o')
+    expect(claimant.data.bounty.viewerClaim).toEqual({ status: 'DISPUTED', posterNote: null })
+    const reviewer = await gql(`query($id: ID!) { bounty(id: $id) { claims { posterNote } } }`, { id: harbor.id }, 'civicone')
+    expect(reviewer.data.bounty.claims[0].posterNote).toBe('The van was mine, parked there legally.')
+    expect((await gql(CANCEL, { id: harbor.id }, 'harbor_watch')).errors?.[0]?.message).toMatch(/can’t be cancelled now/)
+    expect((await gql(CONFIRM, { id: claimId }, 'harbor_watch')).errors?.[0]?.message).toMatch(/already been answered/)
+    // Paying over the poster's objection is an override, recorded as one.
     await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claimId))
     expect((await gql(DECIDE, { id: claimId, decision: 'VERIFY', reason: 'VERIFIED', note: 'Checked.' }, 'civicone')).errors?.[0]?.message).toMatch(/override/)
     const paid = await gql(DECIDE, { id: claimId, decision: 'VERIFY', reason: 'ADMIN_OVERRIDE', note: 'The station confirmed the statement led to the arrest.' }, 'civicone')
     expect(paid.data.decideClaim).toMatchObject({ status: 'PAID', decisionReason: 'ADMIN_OVERRIDE' })
+  })
+
+  it('treats a poster’s silence as no objection, and reopens the bounty when an approved claim is withdrawn', async () => {
+    const harbor = await seeded('Information on the Harbor')
+    const claimId = (await gql(GET, { id: harbor.id }, 'civicone')).data.bounty.claims[0].id as string
+    await APPROVE(claimId)
+    const pay = { id: claimId, decision: 'VERIFY', reason: 'VERIFIED', note: 'Statement confirmed with the station.' }
+    // Eight days on, with the cooling-off over, CIVIC/ONE can pay without the poster's answer.
+    await handle.db.update(schema.bountyClaims).set({ approvedAt: new Date(Date.now() - 8 * 24 * 3600_000), cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claimId))
+    expect((await gql(DECIDE, pay, 'civicone')).data.decideClaim.status).toBe('PAID')
+    const trail = await gql(`query($id: ID!) { bounty(id: $id) { events { kind } } }`, { id: harbor.id }, 'harbor_watch')
+    expect(trail.data.bounty.events.map((e: { kind: string }) => e.kind)).toContain('CLAIM_ESCALATED')
+
+    // An approved claim withdrawn before payment puts the bounty back on the board.
+    await bank('thandi_m')
+    const bike = await funded('alexm')
+    const claim = (await gql(CLAIM, { bountyId: bike, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await APPROVE(claim.id)
+    expect((await gql(GET, { id: bike })).data.bounty.status).toBe('AWAITING_VERIFICATION')
+    await gql(`mutation($id: ID!) { withdrawClaim(id: $id) { status } }`, { id: claim.id }, 'thandi_m')
+    expect((await gql(GET, { id: bike })).data.bounty.status).toBe('OPEN')
   })
 
   it('refunds the poster when a bounty is cancelled, expired or declined', async () => {
@@ -890,7 +979,7 @@ describe('bounties', () => {
     expect(approved.data.approveBounty.status).toBe('OPEN')
   })
 
-  it('sweeps: abandons unpaid checkouts, expires and refunds, and escalates claims a poster ignores', async () => {
+  it('sweeps: abandons unpaid checkouts, expires and refunds, and counts a poster’s silence as no objection', async () => {
     const SWEEP = `mutation { sweepBounties { abandoned expired escalated } }`
     const { data } = await gql(CREATE, { input: property }, 'alexm')
     const draft = data.createBounty.bounty.id
@@ -898,7 +987,9 @@ describe('bounties', () => {
     const corolla = await seeded('Silver 2016')
     await handle.db.update(schema.bounties).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(schema.bounties.id, corolla.id))
     const harbor = await seeded('Information on the Harbor')
-    await handle.db.update(schema.bountyClaims).set({ createdAt: new Date(Date.now() - 15 * 24 * 60 * 60_000) }).where(eq(schema.bountyClaims.bountyId, harbor.id))
+    const claimId = (await gql(GET, { id: harbor.id }, 'civicone')).data.bounty.claims[0].id as string
+    await APPROVE(claimId)
+    await handle.db.update(schema.bountyClaims).set({ approvedAt: new Date(Date.now() - 8 * 24 * 60 * 60_000) }).where(eq(schema.bountyClaims.id, claimId))
 
     expect(code(await gql(SWEEP, {}, 'alexm'))).toBe('FORBIDDEN')
     const swept = await gql(SWEEP, {}, 'civicone')
@@ -906,7 +997,7 @@ describe('bounties', () => {
     expect((await gql(GET, { id: draft }, 'alexm')).data.bounty.status).toBe('ABANDONED')
     const [expired] = await handle.db.select().from(schema.bounties).where(eq(schema.bounties.id, corolla.id))
     expect(expired).toMatchObject({ status: 'EXPIRED', refundedCents: 500000 })
-    expect((await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].status).toBe('DISPUTED')
+    expect((await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].status).toBe('CONFIRMED')
   })
 
   it('keeps the money honest in the database itself', async () => {
@@ -955,6 +1046,7 @@ describe('bounties', () => {
     const id = await funded('alexm')
     const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
     expect(code(await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m'))).toBe('BAD_USER_INPUT')
+    await APPROVE(claim.id)
     await gql(CONFIRM, { id: claim.id }, 'alexm')
     await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claim.id))
     expect((await gql(DECIDE, { id: claim.id, decision: 'VERIFY', reason: 'VERIFIED', note: 'ok' }, 'civicone')).errors?.[0]?.message).toMatch(/on hold until/)
@@ -1095,6 +1187,7 @@ describe('bounties', () => {
     await handle.db.insert(schema.payoutAccounts).values({ userId: thandi.id, provider: 'sandbox', recipientCode: 'RCP_sandbox_250655_1234', bankCode: '250655', bankName: 'FNB', accountName: 'Thandi Mokoena', accountLast4: '1234', fingerprint: 'test-thandi-1234', createdAt: new Date(Date.now() - 100 * 3600_000) })
     const id = await funded('alexm')
     const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await APPROVE(claim.id)
     await gql(CONFIRM, { id: claim.id }, 'alexm')
     await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claim.id))
     // Paystack queues the transfer, then sends it back before it ever settled.
@@ -1122,17 +1215,20 @@ describe('bounties', () => {
     expect(await money(fresh)).toBe('OPEN 100000/0/0')
   })
 
-  it('reopens a bounty whose confirmed claim is rejected after its date while other claims wait, and refunds when none do', async () => {
+  it('reopens a bounty whose approved claim is rejected after its date while other claims wait, and refunds when none do', async () => {
     const admin = await user('civicone')
     const harbor = await seeded('Information on the Harbor')
-    const first = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].id as string
+    const first = (await gql(GET, { id: harbor.id }, 'civicone')).data.bounty.claims[0].id as string
+    await bank('thandi_m')
     const second = (await gql(CLAIM, { bountyId: harbor.id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await APPROVE(first)
     await gql(CONFIRM, { id: first }, 'harbor_watch')
     await handle.db.update(schema.bounties).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(schema.bounties.id, harbor.id))
     await decideClaim(ctx, admin, first, 'REJECT', 'NOT_ENOUGH_EVIDENCE', 'The station has no record of this statement.')
-    // Thandi's claim is still being answered, so the bounty reopens instead of expiring over her head.
+    // Thandi's claim is still being checked, so the bounty reopens instead of expiring over her head.
     expect(await money(harbor.id)).toBe('OPEN 200000/0/0')
-    expect((await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims.map((c: { id: string; status: string }) => c.status).sort()).toEqual(['REJECTED', 'SUBMITTED'])
+    const posterSees = (await gql(`query($id: ID!) { bounty(id: $id) { claimsBeingChecked claims { status } } }`, { id: harbor.id }, 'harbor_watch')).data.bounty
+    expect(posterSees).toEqual({ claimsBeingChecked: 1, claims: [{ status: 'REJECTED' }] })
     // The poster hears the decision with its public reason, not the admin's note to the claimant.
     const posterView = await gql(`{ notifications(first: 5) { edges { node { bountyEvent note } } } }`, {}, 'harbor_watch')
     const rejection = posterView.data.notifications.edges.map((e: { node: { bountyEvent: string; note: string | null } }) => e.node).find((n: { bountyEvent: string }) => n.bountyEvent === 'CLAIM_REJECTED')
@@ -1169,6 +1265,7 @@ describe('bounties', () => {
     await handle.db.update(schema.payoutAccounts).set({ createdAt: new Date(Date.now() - 100 * 3600_000) }).where(eq(schema.payoutAccounts.userId, thandi.id))
     const id = await funded('alexm')
     const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await APPROVE(claim.id)
     await gql(CONFIRM, { id: claim.id }, 'alexm')
     await handle.db.update(schema.bountyClaims).set({ cooldownUntil: new Date(Date.now() - 1000) }).where(eq(schema.bountyClaims.id, claim.id))
     // The account ending 0000 bounces; she then swaps in a brand-new one.
@@ -1198,13 +1295,16 @@ describe('bounties', () => {
 
     // The poster's note to the reviewer never reaches the claimant; the claimant's withdrawn claim never reaches the poster.
     const harbor = await seeded('Information on the Harbor')
-    const claimId = (await gql(GET, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].id as string
+    const claimId = (await gql(GET, { id: harbor.id }, 'civicone')).data.bounty.claims[0].id as string
+    await APPROVE(claimId)
     await gql(CONFIRM, { id: claimId, note: 'He keeps coming to my house; please check him.' }, 'harbor_watch')
     const NOTES = `query($id: ID!) { bounty(id: $id) { viewerClaim { posterNote confirmNote } claims { confirmNote } } }`
     expect((await gql(NOTES, { id: harbor.id }, 'jordan_o')).data.bounty.viewerClaim).toEqual({ posterNote: null, confirmNote: null })
     expect((await gql(NOTES, { id: harbor.id }, 'harbor_watch')).data.bounty.claims[0].confirmNote).toMatch(/coming to my house/)
+    await bank('thandi_m')
     const bike = await funded('alexm')
     const claim = (await gql(CLAIM, { bountyId: bike, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
+    await APPROVE(claim.id)
     await gql(`mutation($id: ID!) { withdrawClaim(id: $id) { status } }`, { id: claim.id }, 'thandi_m')
     expect((await gql(GET, { id: bike }, 'alexm')).data.bounty.claims).toEqual([])
     expect((await gql(GET, { id: bike }, 'civicone')).data.bounty.claims).toHaveLength(1)
@@ -1229,8 +1329,10 @@ describe('bounties', () => {
 
   it('refuses admin actions on an admin’s own bounty, and settings that aren’t a number of hours', async () => {
     const id = await funded('civicone')
+    await bank('thandi_m')
     const claim = (await gql(CLAIM, { bountyId: id, input: { body: claimBody, attested: true } }, 'thandi_m')).data.submitClaim
-    await gql(CONFIRM, { id: claim.id }, 'civicone')
+    // The second pair of eyes has to be someone else's: an admin can't check a claim on their own bounty.
+    expect(code(await APPROVE(claim.id))).toBe('FORBIDDEN')
     for (const mutation of ['adminCancelBounty', 'freezeBounty']) {
       expect(code(await gql(`mutation($id: ID!, $note: String!) { ${mutation}(id: $id, note: $note) { status } }`, { id, note: 'x' }, 'civicone'))).toBe('FORBIDDEN')
     }

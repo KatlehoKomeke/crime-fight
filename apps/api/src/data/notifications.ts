@@ -5,7 +5,7 @@ import { alias, type AnyPgColumn, unionAll } from 'drizzle-orm/pg-core'
 import { type Connection, decodeCursor, type PageArgs, pageSize, toConnection } from './pagination'
 import { filters } from './posts'
 
-const { posts, likes, reposts, follows, bountyEvents } = schema
+const { posts, likes, reposts, follows, bountyEvents, bountyClaims, bounties } = schema
 
 export const NOTIFICATION_KINDS = ['ALERT', 'REPLY', 'LIKE', 'REPOST', 'FOLLOW', 'BOUNTY'] as const
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -67,15 +67,21 @@ function activity(db: Database, viewerId: string) {
     reactions(reposts, 'REPOST'),
     db.select(columns('FOLLOW', [follows.followerId], follows.followerId, null, follows.createdAt)).from(follows).where(eq(follows.followeeId, viewerId)),
     db
-      // Admin actions are never attributed by name: the app shows CIVIC/ONE.
+      // Admin actions are never attributed by name: the app shows CIVIC/ONE. And a poster isn't told who sent a claim
+      // until CIVIC/ONE has approved it.
       .select(
-        columns('BOUNTY', [bountyEvents.id], sql`case when ${bountyEvents.byAdmin} then null else ${bountyEvents.actorId} end`, null, bountyEvents.createdAt, {
-          bountyId: bountyEvents.bountyId,
-          eventKind: bountyEvents.kind,
-          note: bountyEvents.note,
-        }),
+        columns(
+          'BOUNTY',
+          [bountyEvents.id],
+          sql`case when ${bountyEvents.byAdmin} then null when ${bountyEvents.claimId} is not null and ${bountyClaims.approvedAt} is null and ${bounties.posterId} = ${bountyEvents.recipientId} then null else ${bountyEvents.actorId} end`,
+          null,
+          bountyEvents.createdAt,
+          { bountyId: bountyEvents.bountyId, eventKind: bountyEvents.kind, note: bountyEvents.note },
+        ),
       )
       .from(bountyEvents)
+      .leftJoin(bountyClaims, eq(bountyClaims.id, bountyEvents.claimId))
+      .leftJoin(bounties, eq(bounties.id, bountyEvents.bountyId))
       .where(and(eq(bountyEvents.recipientId, viewerId), or(isNull(bountyEvents.actorId), ne(bountyEvents.actorId, viewerId)))),
   ] as const
 }

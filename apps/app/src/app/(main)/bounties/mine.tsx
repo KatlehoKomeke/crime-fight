@@ -123,7 +123,8 @@ export default function MyBountiesScreen() {
 /** A bounty you posted, with what it needs from you: paying for it, or answering the claims waiting on it. */
 function PostedRow({ bounty, canPay, paying, disabled, onPay }: { bounty: MyBounty; canPay: boolean; paying: boolean; disabled: boolean; onPay: () => void }) {
   const c = useColors()
-  const waiting = bounty.claims.filter((claim) => claim.status === 'SUBMITTED').length
+  // The poster sees a claim once CIVIC/ONE approves it, and then it waits for their answer.
+  const waiting = bounty.claims.filter((claim) => claim.status === 'APPROVED').length
   return (
     <BountyRow bounty={bounty}>
       {bounty.status === 'PENDING_PAYMENT' && canPay ? (
