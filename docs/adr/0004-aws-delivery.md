@@ -40,7 +40,7 @@ pull request ─► CI only
 
 | | QA | Prod |
 | --- | --- | --- |
-| Aurora | 0–2 ACU, auto-pause after 15 min | 0.5–16 ACU + 1 reader, deletion protection, 14-day backups |
+| Aurora | 0–2 ACU, auto-pause after 15 min | 0–4 ACU, auto-pause after 15 min, no reader, deletion protection, 14-day backups (pre-launch, to keep the bill near storage only; add a reader and a 0.5 ACU floor at launch) |
 | GraphQL | Ad-hoc queries allowed, GraphiQL on | **Persisted operations only**, GraphiQL off, optional reserved concurrency (`API_RESERVED_CONCURRENCY`) |
 | Cognito | Extra `localhost` callback for testing | Deletion protection, retained on stack delete |
 

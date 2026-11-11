@@ -35,7 +35,7 @@
 **Aurora PostgreSQL 17, Serverless v2, with PostGIS, `pg_trgm` and built-in full-text search, accessed from Lambda through the RDS Data API. Schema and migrations in Drizzle ORM.**
 
 - **QA:** min 0 ACU / max 2, auto-pauses after 15 min idle (first request after a pause waits ~15 s; the client retries `DatabaseResumingException` transparently — see `packages/db/src/client.ts`).
-- **Prod:** min 0.5 ACU / max 16, one reader that scales with the writer, deletion protection, 14-day backups.
+- **Prod:** until launch, min 0 ACU / max 4 with the same 15-minute auto-pause as QA, no reader, deletion protection, 14-day backups. The page warmer and the payments sweep are off, since either would keep it awake (November 2026: the always-on writer and reader were nearly the whole AWS bill). At launch: min 0.5 ACU, one reader that scales with the writer, and the warmer back on.
 - **Local/CI:** the same Postgres 17 + PostGIS 3.5 in Docker, over `node-postgres`; the Drizzle query builder is identical on both drivers.
 
 Postgres was your starting point, and the research backs it. No alternative is better on the axes this product depends on (PostGIS, relational integrity, scale-to-zero, living in our AWS account under CDK). What changed from "just Postgres" is *how* we run it:

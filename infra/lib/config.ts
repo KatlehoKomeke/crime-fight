@@ -57,7 +57,8 @@ export interface StageConfig {
 const env = process.env
 const optionalNumber = (value: string | undefined) => (value ? Number(value) : undefined)
 const handles = (value: string | undefined) => (value ?? '').split(',').map((h) => h.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)
-const payments = (secretName: string | undefined, sweep: boolean): StageConfig['payments'] => (secretName ? { provider: 'paystack', secretName, sweep } : { provider: 'disabled', sweep })
+// The hourly sweep only has work once payments are on; without them it would just keep Aurora awake.
+const payments = (secretName: string | undefined, sweep: boolean): StageConfig['payments'] => (secretName ? { provider: 'paystack', secretName, sweep } : { provider: 'disabled', sweep: false })
 
 const sso: SsoConfig = {
   google: env.GOOGLE_CLIENT_ID ? { clientId: env.GOOGLE_CLIENT_ID } : undefined,
@@ -101,7 +102,9 @@ export const stages: Record<StageName, StageConfig> = {
     certificateArn: env.PROD_CERTIFICATE_ARN,
     hostedZoneId: env.PROD_HOSTED_ZONE_ID,
     hostedZoneName: env.PROD_HOSTED_ZONE_NAME,
-    database: { minCapacity: 0.5, maxCapacity: 16, readers: 1, deletionProtection: true, backupRetentionDays: 14 },
+    // Pre-launch traffic: one instance that pauses after 15 idle minutes (storage is all that's billed while paused). The first
+    // request after a pause waits ~15 s while it resumes; the API retries through it. Add readers and a non-zero minimum at launch.
+    database: { minCapacity: 0, maxCapacity: 4, readers: 0, deletionProtection: true, backupRetentionDays: 14 },
     // Reserving needs an account concurrency quota of reserved + 100; new accounts start at 10.
     api: { memoryMb: 1536, reservedConcurrency: optionalNumber(env.PROD_API_RESERVED_CONCURRENCY), throttleRate: 500, throttleBurst: 1000 },
     web: { memoryMb: 2048 },
@@ -109,7 +112,8 @@ export const stages: Record<StageName, StageConfig> = {
     alarmEmail: env.PROD_ALARM_EMAIL,
     extraCallbackUrls: [],
     sso,
-    warm: true,
+    // The warmer loads pages every minute, and every page queries the database, so it would keep Aurora from ever pausing.
+    warm: false,
     payments: payments(env.PROD_PAYSTACK_SECRET_NAME, true),
     adminHandles: handles(env.PROD_ADMIN_HANDLES ?? env.ADMIN_HANDLES),
   },
